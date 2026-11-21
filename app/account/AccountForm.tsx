@@ -1,10 +1,13 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
 import { createAuthClient } from "better-auth/react";
+import { useRouter } from "next/navigation";
+import { transferPrivateAccess } from "../private-transfer";
 const client = createAuthClient();
 type Mode = "signin" | "signup" | "forgot" | "reset";
 
 export function AccountForm({ methods, initialPath }: { initialPath: "public" | "private"; methods: { github: boolean; google: boolean; email: boolean } }) {
+  const router = useRouter();
   const { data: session, isPending } = client.useSession();
   const [mode, setMode] = useState<Mode>("signin");
   const [path, setPath] = useState(initialPath);
@@ -21,6 +24,25 @@ export function AccountForm({ methods, initialPath }: { initialPath: "public" | 
     setBusy(true); setNotice("");
     try { const result = await action(); setNotice(result.error ? result.error.message || "Please try again." : success); }
     catch { setNotice("Connection interrupted. Please try again."); } finally { setBusy(false); }
+  }
+  async function connectPrivate(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fields = new FormData(form);
+    const access = String(fields.get("access") || "").trim();
+    setBusy(true); setNotice("");
+    try {
+      const response = await fetch("/api/auth/private-repository", { method:"POST", headers:{
+        "Content-Type":"application/json", Authorization:"Bearer " + access,
+      }, body:JSON.stringify({repository:fields.get("repository")}) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Check repository access and try again.");
+      transferPrivateAccess({userId:data.userId, repository:data.repository, token:access});
+      form.reset();
+      router.push("/workspace?path=private");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not connect.");
+    } finally { setBusy(false); }
   }
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -40,7 +62,15 @@ export function AccountForm({ methods, initialPath }: { initialPath: "public" | 
   return <section><fieldset className="access-picks"><legend>Workspace access</legend>
     {(["private","public"] as const).map(value => <label key={value}><input type="radio" name="path" checked={value === path} disabled={busy} onChange={() => setPath(value)} />
       <span><strong>{value === "private" ? "Private team handover" : "Public repo learning"}</strong><small>{value === "private" ? "For engineers with access to a team repository." : "For exploring GitHub projects at your own pace."}</small></span></label>)}</fieldset>
-    {session && mode !== "reset" ? <><p>Signed in as {session.user.email}</p><a className="ink-button" href={destination}>Enter workspace →</a>
+    {path === "private" && !session && mode === "signin" && <form onSubmit={connectPrivate}>
+      <h2>Connect a private repository</h2>
+      <p>Sign in with your GitHub repository token. Ask your manager to grant you read access in GitHub first.</p>
+      <label>Private repository<input name="repository" required placeholder="organization/repository" maxLength={170} /></label>
+      <label>Fine-grained read token<input name="access" type="password" required autoComplete="off" /></label>
+      <small>Select this repository and allow read access to contents, issues and pull requests. The token stays in tab memory and is sent to SkillForge for GitHub requests.</small>
+      <button className="action" disabled={busy}>Connect private repository</button>
+    </form>}
+    {session && mode !== "reset" ? <><p>Signed in as {session.user.name || session.user.email}</p><a className="ink-button" href={destination}>Enter workspace →</a>
     <button disabled={busy} onClick={() => run(() => client.signOut())}>Sign out</button></> : <>
     {path === "public" && mode !== "reset" && <a className="ink-button" href={destination}>Continue as guest →</a>}
     {(["github", "google"] as const).map(provider => methods[provider] && <button key={provider} disabled={busy}
@@ -53,6 +83,6 @@ export function AccountForm({ methods, initialPath }: { initialPath: "public" | 
       <button className="action" disabled={busy}>{ { signin: "Sign in", signup: "Create account", forgot: "Send reset link", reset: "Save new password" }[mode]}</button>
       {(["signin", "signup", "forgot"] as const).filter(x => x !== mode).map(x => <button type="button" key={x} onClick={() => { setMode(x); setNotice(""); }}>{ {signin:"Sign in", signup:"Create account", forgot:"Forgot password?"}[x]}</button>)}
     </form>}
-    {!Object.values(methods).some(Boolean) && <p>Sign-in providers haven’t been connected on this installation. The public repository desk is open.</p>}
+    {path === "public" && !Object.values(methods).some(Boolean) && <p>Sign-in providers haven’t been connected on this installation. The public repository desk is open.</p>}
     </>}<p role="status">{busy ? "Connecting…" : notice}</p></section>;
 }

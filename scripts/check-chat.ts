@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { POST } from "../app/api/ask/route";
 import { driver } from "../lib/neo4j";
 
+import { accounts } from "../lib/auth";
 import { verifiedTestSession } from "./account-fixture";
 let cookie = "";
 const actualFetch = globalThis.fetch;
@@ -32,6 +33,7 @@ try {
   process.env.SARVAM_API_KEY = "fixture";
   let sentToSarvam = 0;
   let authorized = true;
+  const privateToken = "github_pat_" + "fixture".repeat(4);
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
     if (url.hostname === "api.sarvam.ai") {
@@ -41,7 +43,9 @@ try {
     }
     assert.equal(url.hostname, "api.github.com");
     const credential = new Headers(init?.headers).get("authorization");
-    if (!authorized || credential !== "Bearer fixture_read_token") return Response.json({}, { status: 404 });
+    if (!authorized || !(["Bearer fixture_read_token", "Bearer " + privateToken].includes(credential || ""))) return Response.json({}, { status: 404 });
+    if (url.pathname === "/user") return Response.json({ id:15420,login:"private-fixture" });
+    if (url.pathname === "/repos/example/public") return Response.json({ private:false, full_name:"example/public" });
     if (url.pathname === "/repos/example/internal") return Response.json({ private: true, full_name: "example/internal" });
     if (url.pathname.endsWith("/pulls")) return Response.json([{
       number: 12, title: "Guard sync retries", body: "Prevent duplicate writes during sync retries.",
@@ -51,6 +55,20 @@ try {
   };
   const privatePath = { mode: "private", repo: "example/internal" };
   assert.equal((await ask("Why sync retries?", privatePath)).status, 401);
+  const auth = await accounts();
+  const connect = (repo:string, origin = server) => auth.handler(new Request(server + "/api/auth/private-repository", {
+    method:"POST", headers:{ origin, "content-type":"application/json", authorization:"Bearer " + privateToken }, body:JSON.stringify({repository:repo}),
+  }));
+  assert.equal((await connect("example/public")).status,403);
+  assert.equal((await connect("example/internal","https://other.example")).status,403);
+  const first = await connect("example/internal");
+  assert.equal(first.status,200);
+  const identity = await first.json();
+  assert(identity.userId);
+  const repeat = await connect("example/internal");
+  assert.equal((await repeat.json()).userId,identity.userId);
+  cookie = first.headers.getSetCookie().map(value => value.split(";")[0]).join("; ");
+  assert.equal((await ask("Why sync retries?",privatePath,privateToken)).status,200);
   cookie = account.cookie;
   assert.equal((await ask("Why sync retries?", privatePath, "wrong_fixture_token")).status, 403);
   const evidence = await (await ask("Why sync retries?", privatePath, "fixture_read_token")).json();

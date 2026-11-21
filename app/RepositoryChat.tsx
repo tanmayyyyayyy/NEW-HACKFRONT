@@ -2,7 +2,8 @@
 
 import { EvidenceTrail, downloadTrail } from "./EvidenceTrail";
 import { createAuthClient } from "better-auth/react";
-import { useState } from "react";
+import { takePrivateAccess } from "./private-transfer";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import type { Evidence } from "@/lib/repository-chat";
 
@@ -20,12 +21,17 @@ const examples = [
 const client = createAuthClient();
 export function RepositoryChat({ initialMode, starter }: { initialMode: Mode; starter?: string }) {
   const { data: session, isPending } = client.useSession();
-  return <Desk key={session?.user.id || "guest"} signedIn={Boolean(session)} isPending={isPending} initialMode={initialMode} starter={starter} />;
+  return <Desk key={session?.user.id || "guest"} userId={session?.user.id} signedIn={Boolean(session)} isPending={isPending} initialMode={initialMode} starter={starter} />;
 }
-function Desk({ initialMode, signedIn, isPending, starter }: { initialMode: Mode; starter?: string; signedIn: boolean; isPending: boolean }) {
+function Desk({ initialMode, signedIn, isPending, starter, userId }: { userId?: string; initialMode: Mode; starter?: string; signedIn: boolean; isPending: boolean }) {
   const mode = initialMode;
   const [repo, setRepo] = useState(starter ? "AppFuton/Futon" : "");
   const [token, setToken] = useState("");
+  useEffect(() => {
+    if (!userId || mode !== "private") return;
+    const access = takePrivateAccess(userId);
+    if (access) { setRepo(access.repository); setToken(access.token); }
+  }, [mode, userId]);
   const [language, setLanguage] = useState("Hinglish");
   const [sarvam, setSarvam] = useState(false);
   const [question, setQuestion] = useState(starter || "");
@@ -49,7 +55,12 @@ function Desk({ initialMode, signedIn, isPending, starter }: { initialMode: Mode
         body: JSON.stringify({ mode, repo, question: prompt, language, sarvam, contextIds: follow ? contextIds : [], throughDate: (follow ? active?.answer.throughDate : throughDate) || undefined }),
       });
       const result = await response.json() as Result;
-      if (!response.ok) throw new Error(result.error || "The question could not be answered.");
+      if (!response.ok) {
+        if (mode === "private" && [401,403].includes(response.status)) {
+          setTurns([]); setSelected(0); setFollowUp(""); setToken(""); setSarvam(false);
+        }
+        throw new Error(result.error || "The question could not be answered.");
+      }
       setTurns(previous => [...previous.slice(-5), { question: prompt, answer: result }]);
       setSelected(0); setQuestion(""); setFollowUp("");
     } catch (failure) {
