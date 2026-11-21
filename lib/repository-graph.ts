@@ -93,8 +93,11 @@ export async function readRepositoryGraph(repository: string, mode: "public" | "
   for (const pull of pulls) {
     const evidence = (pull.title + (pull.body ? "\n\n" + pull.body : "")).trim().slice(0, 2400);
     add({ id: pullId(pull.number), label: "#" + pull.number, detail: pull.title.slice(0, 200), kind: "pull",
-      url: web + "/pull/" + pull.number, createdAt: pull.created_at || undefined, mergedAt: pull.merged_at || undefined,
-      author: pull.user?.login, evidence });
+      url: web + "/pull/" + pull.number, evidence,
+      ...(pull.created_at && { createdAt: pull.created_at }),
+      ...(pull.merged_at && { mergedAt: pull.merged_at }),
+      ...(pull.user?.login && { author: pull.user.login }),
+    });
   }
   const pullCommits = await Promise.all(pulls.slice(0, 4).map(async pull => ({
     pull, commits: await data<Commit[]>(prefix + "/pulls/" + pull.number + "/commits?per_page=14", credential),
