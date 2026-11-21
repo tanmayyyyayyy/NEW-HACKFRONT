@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { accounts } from "@/lib/auth";
 import { matchesAppOrigin } from "@/lib/app-origin";
+import { configuredAppUrl } from "@/lib/site-url";
 import { withQueryBudget } from "@/lib/query-budget";
 import { graphModel, sourceFileLimit, treeEntryLimit } from "@/lib/graph-model";
 import { persistRepositoryGraph } from "@/lib/repository-graph";
@@ -47,7 +48,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!matchesAppOrigin(request.headers.get("origin"), process.env.APP_ORIGIN || new URL(request.url).origin)) {
+  if (!matchesAppOrigin(request.headers.get("origin"), configuredAppUrl() || new URL(request.url).origin)) {
     return reply({ error: "Open SkillForge at its configured address before uploading." }, 403);
   }
   if (!request.headers.has("cookie")) return reply({ error: "Sign in before indexing a local folder." }, 401);

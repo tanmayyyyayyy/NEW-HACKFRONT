@@ -3,6 +3,7 @@ import { accounts } from "@/lib/auth";
 import { z } from "zod";
 import { RepositoryError, repositoryEvidence, repositoryName } from "@/lib/repository-chat";
 import { matchesAppOrigin } from "@/lib/app-origin";
+import { configuredAppUrl } from "@/lib/site-url";
 import { explainEvidence } from "@/lib/answer-explanation";
 
 const requestSchema = z.object({
@@ -18,7 +19,7 @@ const requestSchema = z.object({
 export async function POST(request: Request) {
   const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
   const origin = request.headers.get("origin");
-  const appOrigin = process.env.APP_ORIGIN || new URL(request.url).origin;
+  const appOrigin = configuredAppUrl() || new URL(request.url).origin;
   if (!matchesAppOrigin(origin, appOrigin)) {
     return reply({ error: "Request origin could not be verified. Open SkillForge at its configured address and try again." }, 403);
   }

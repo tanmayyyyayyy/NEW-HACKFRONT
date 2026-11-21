@@ -176,12 +176,12 @@ Live OAuth callbacks, real email delivery, organization token approval and Sarva
 
 ## Deploying on Render
 
-The root Blueprint provisions a **paid Starter web instance and persistent disk**. Review the plan before applying it. The Docker image runs the Next.js production server as the `node` user and stores account data at `/var/data/accounts.sqlite`. [Render Blueprint](render.yaml) · [Dockerfile](Dockerfile)
+The root Blueprint provisions a **free web service**. The Docker image runs Next.js as the `node` user and stores accounts in `.local/accounts.sqlite`. Render can discard that file on redeploy or restart. For durable accounts, use a plan with a persistent disk and set `ACCOUNT_DATABASE` to a path on that disk. [Render Blueprint](render.yaml) · [Dockerfile](Dockerfile)
 
 1. Connect this repository as a Blueprint and select the root `render.yaml`.
 2. Set the exact HTTPS origin and Neo4j credentials. Render generates the account secret. Keep it stable across deployments.
 3. Add the optional provider keys you intend to use and register OAuth callbacks against the deployed origin. Set `GITHUB_PUBLIC_READ_TOKEN` in the web service environment to raise the limit for live public history.
-4. Open `/api/health` to check Neo4j connectivity. Then run the three public demo questions, a private sign-in and a revoked-access check. A healthy graph alone does not verify login, mail or AI delivery.
+4. Open `/api/health` and check that `neo4j` is `connected`. The endpoint can report the service ready while the database is disconnected. Then run the three public demo questions, a private sign-in and a revoked-access check. A healthy graph alone does not verify login, mail or AI delivery.
 
 This configuration targets a single application instance. SQLite needs durable storage and backups. The process-local query budget allows six concurrent queries and 90 starts per minute. A multi-instance rollout needs a shared account store and coordinated limits. [Query budget](lib/query-budget.ts)
 

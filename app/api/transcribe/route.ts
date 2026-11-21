@@ -1,4 +1,5 @@
 import { matchesAppOrigin } from "@/lib/app-origin";
+import { configuredAppUrl } from "@/lib/site-url";
 import { withQueryBudget } from "@/lib/query-budget";
 
 const formats = new Map([["audio/webm", "webm"], ["audio/mp4", "m4a"], ["audio/ogg", "ogg"]]);
@@ -7,7 +8,7 @@ const reply = (body: object, status = 200) => Response.json(body, { status, head
 
 export async function POST(request: Request) {
   const url = new URL(request.url);
-  if (!matchesAppOrigin(request.headers.get("origin"), process.env.APP_ORIGIN || url.origin)) {
+  if (!matchesAppOrigin(request.headers.get("origin"), configuredAppUrl() || url.origin)) {
     return reply({ error: "Open SkillForge at its configured address to use dictation." }, 403);
   }
   const language = url.searchParams.get("language");

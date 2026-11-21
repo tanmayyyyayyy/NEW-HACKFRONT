@@ -3,6 +3,7 @@ import { test, type TestContext } from "node:test";
 import { POST } from "../app/api/ask/route";
 import { POST as transcribe } from "../app/api/transcribe/route";
 import { matchesAppOrigin } from "../lib/app-origin";
+import { configuredAppUrl, siteOrigin } from "../lib/site-url";
 import { explainEvidence } from "../lib/answer-explanation";
 import { driver } from "../lib/neo4j";
 
@@ -160,4 +161,18 @@ test("ask route preserves evidence on provider failures and requires consent for
   assert.equal(payload.summary, null);
   assert.equal(payload.evidence[0].record.id, "#146");
   assert.equal(fetch.mock.callCount(), 2);
+});
+
+
+test("Render falls back to its public origin while preserving explicit configuration and strict origin checks", t => {
+  config(t, { APP_ORIGIN: undefined, RENDER_EXTERNAL_URL: "https://skillforge.onrender.com/", RENDER_EXTERNAL_HOSTNAME: "fallback.onrender.com" });
+  assert.equal(siteOrigin(), "https://skillforge.onrender.com");
+  assert(matchesAppOrigin("https://skillforge.onrender.com", configuredAppUrl()));
+  assert(!matchesAppOrigin(null, configuredAppUrl()));
+  assert(!matchesAppOrigin("https://unexpected.example", configuredAppUrl()));
+  delete process.env.RENDER_EXTERNAL_URL;
+  assert.equal(siteOrigin(), "https://fallback.onrender.com");
+  process.env.APP_ORIGIN = "https://custom.example";
+  assert.equal(siteOrigin(), "https://custom.example");
+  assert(!matchesAppOrigin("https://fallback.onrender.com", configuredAppUrl()));
 });

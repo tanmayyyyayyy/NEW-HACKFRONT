@@ -1,5 +1,6 @@
 import { githubTokenSignIn } from "./github-token-signin";
 import { trustedAppOrigins } from "./app-origin";
+import { siteOrigin } from "./site-url";
 import { betterAuth } from "better-auth";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
@@ -24,7 +25,7 @@ async function sendMail(email: string, subject: string, url: string) {
 }
 
 async function initialize() {
-  const baseURL = process.env.APP_ORIGIN;
+  const baseURL = siteOrigin();
   const secret = process.env.BETTER_AUTH_SECRET;
   if (!baseURL || !secret || secret.length < 32) throw new Error("Configure the account origin and secret.");
   const file = process.env.ACCOUNT_DATABASE || ".local/accounts.sqlite";

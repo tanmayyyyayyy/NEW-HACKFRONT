@@ -1,4 +1,5 @@
 import { matchesAppOrigin } from "@/lib/app-origin";
+import { configuredAppUrl } from "@/lib/site-url";
 import { accounts } from "@/lib/auth";
 import { withQueryBudget } from "@/lib/query-budget";
 import { repositoryName, RepositoryError } from "@/lib/repository-chat";
@@ -7,7 +8,7 @@ import { readRepositoryGraph } from "@/lib/repository-graph";
 export async function POST(request: Request) {
   const reply = (body: object, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
   const url = new URL(request.url);
-  if (!matchesAppOrigin(request.headers.get("origin"), process.env.APP_ORIGIN || url.origin)) {
+  if (!matchesAppOrigin(request.headers.get("origin"), configuredAppUrl() || url.origin)) {
     return reply({ error: "Open SkillForge at its configured address and try again." }, 403);
   }
   const input = url.searchParams.get("repo") || "";
