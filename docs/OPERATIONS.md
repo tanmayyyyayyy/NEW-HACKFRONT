@@ -57,6 +57,12 @@ The implementation covers public GitHub import and opt-in connected selection, b
 
 The current database stores graph metadata in the scan snapshot. Decision context can use a temporary Neo4j projection when configured. Private repository access, Google and email sign-in, resume extraction, the full legacy career simulation suite, and legacy data migrations remain follow-up work. Keep the inherited inventory as a roadmap and confirm environment and provider choices before enabling those features.
 
+## Security verification
+
+Production API mutations require the configured HTTPS origin and enforce a 64 KB body limit on both declared lengths and streamed payloads. Validation responses omit submitted values. Session cookies are Secure and HttpOnly in production, and workspace lookups are scoped to the owning session or account. The production frontend's content security policy restricts scripts and connections to the same origin and blocks framing. Inline styles are permitted for the graph and scorecard.
+
+CI audits the locked JavaScript dependencies and Python runtime dependencies and runs regression tests for request boundaries and workspace isolation. A dependency audit checks published advisories for the installed versions. Validate Render's public headers and TLS after deployment and keep any optional evaluator on its separate isolated host.
+
 ## Operational checks
 
 Use `GET /api/health` for API liveness and current database connectivity. Monitor the oldest queued scan, failed scans by rate limits or provider outages, evaluator availability, and PostgreSQL backups. Keep access-log redaction at the reverse proxy and exclude HTTP bodies, cookies, credentials, and callback query values from logs.

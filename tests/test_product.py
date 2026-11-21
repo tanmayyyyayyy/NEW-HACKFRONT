@@ -169,6 +169,20 @@ class WorkspaceTests(unittest.TestCase):
                 self.assertEqual(response.headers["cache-control"], "no-store")
                 self.assertIn("default-src 'none'", response.headers["content-security-policy"])
 
+    def test_chunked_api_body_is_bounded_and_validation_does_not_echo_input(self):
+        with TestClient(app) as client:
+            client.get("/api/session").raise_for_status()
+            oversized = client.post("/api/scans", headers=ORIGIN, content=iter([b"x" * 32_000, b"y" * 32_001]))
+            self.assertEqual(oversized.status_code, 413)
+            self.assertEqual(oversized.headers["cache-control"], "no-store")
+            valid = client.post("/api/scans", headers={**ORIGIN, "Content-Type": "application/json"},
+                                content=iter([b'{"repository":', b'"example/chunked"}']))
+            self.assertEqual(valid.status_code, 202)
+            client.delete("/api/scans/" + valid.json()["id"], headers=ORIGIN).raise_for_status()
+            invalid = client.post("/api/scans", headers=ORIGIN, json={"repository": {"value": "private-input"}})
+            self.assertEqual(invalid.status_code, 422)
+            self.assertNotIn("private-input", invalid.text)
+
     def test_public_metadata_matches_the_configured_origin(self):
         origin = "https://skillforge.example"
         with tempfile.TemporaryDirectory() as directory:

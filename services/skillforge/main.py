@@ -13,10 +13,12 @@ from uuid import uuid4
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, insert, select, update
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import config
 from .career import router as career_router
@@ -61,15 +63,56 @@ async def lifespan(_app):
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
+class LimitMutationBody:
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http" or not scope["path"].startswith("/api/") or scope["method"] in SAFE_METHODS:
+            await self.app(scope, receive, send)
+            return
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > MAX_MUTATION_BYTES:
+                await JSONResponse({"detail": "Request is too large."}, 413)(scope, receive, send)
+                return
+            body.extend(chunk)
+            if not message.get("more_body"):
+                break
+        buffered = bytes(body)
+
+        async def replay():
+            nonlocal buffered
+            if buffered is None:
+                return await receive()
+            message = {"type": "http.request", "body": buffered, "more_body": False}
+            buffered = None
+            return message
+
+        await self.app(scope, replay, send)
+
+
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+MAX_MUTATION_BYTES = 64_000
+app.add_middleware(LimitMutationBody)
+
+
 @app.middleware("http")
 async def boundaries(request, call_next):
     rejection = None
-    if request.url.path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
+    if request.url.path.startswith("/api/") and request.method not in SAFE_METHODS:
         if request.headers.get("origin") != config.ORIGIN:
             rejection = JSONResponse({"detail": "Request origin could not be verified."}, 403)
         else:
             content_length = request.headers.get("content-length")
-            if content_length and (not content_length.isdecimal() or int(content_length) > 64_000):
+            if content_length and (
+                not content_length.isdecimal() or len(content_length) > 5
+                or int(content_length) > MAX_MUTATION_BYTES
+            ):
                 rejection = JSONResponse({"detail": "Request is too large."}, 413)
     response = rejection if rejection is not None else await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -86,9 +129,15 @@ async def boundaries(request, call_next):
         response.headers["Content-Security-Policy"] = (
             "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" if is_api else
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-            "connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+            "connect-src 'self'; script-src-attr 'none'; frame-src 'none'; frame-ancestors 'none'; "
+            "object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"
         )
     return response
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(_request, _exc):
+    return JSONResponse({"detail": "Check the request fields and try again."}, 422)
 
 
 @app.exception_handler(GitHubError)

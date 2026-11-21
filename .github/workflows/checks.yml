@@ -22,7 +22,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: node --experimental-strip-types --test tests/graphView.test.mjs
-      - run: npm audit --omit=dev
+      - run: npm audit
   service:
     runs-on: ubuntu-latest
     steps:
@@ -30,5 +30,9 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --directory services --locked --python 3.12
       - run: uv run --directory services --locked ruff check --config pyproject.toml skillforge ../tests
+      - name: Audit locked Python runtime dependencies
+        run: |
+          uv export --directory services --locked --no-dev --no-emit-project --no-hashes --quiet -o "$RUNNER_TEMP/skillforge-requirements.txt"
+          uvx --python 3.12 pip-audit==2.10.1 --no-deps --disable-pip -r "$RUNNER_TEMP/skillforge-requirements.txt"
       - run: uv run --directory services --locked python -m compileall -q skillforge
       - run: uv run --directory services --locked python -m unittest discover -s ../tests -v
