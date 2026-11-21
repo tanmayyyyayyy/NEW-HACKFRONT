@@ -31,9 +31,17 @@ Open [the local workspace](http://localhost:5173/). The seeded example, public U
 
 For optional integrations, copy `.env.example` to an ignored `.env` at the repo root. From `services`, add `--env-file ../.env` to the `uv run` arguments.
 
-## Staging deployment
+## Deploy to Render
 
-The [Render Blueprint](../render.yaml) creates a free web service and a free PostgreSQL database in one region. The web service uses Render’s assigned public URL, runs the initial migration before listening, and includes the scan worker. Render’s free database expires after 30 days. Use persistent compute and a separately deployed worker for a long-running environment. [Render free-plan limits](https://render.com/docs/free)
+1. Open [Deploy NEW-HACKFRONT to Render](https://render.com/deploy?repo=https://github.com/tanmayyyyayyy/NEW-HACKFRONT) and sign in. If Render requests GitHub access, connect the destination repository and select its `main` branch.
+2. Review and deploy the [Blueprint](../render.yaml). It creates one Docker web service and one PostgreSQL database in Singapore. Render provides the database connection and public origin. The service applies the schema, starts the scan worker, and listens on Render's assigned port.
+3. When the service shows **Live**, open its assigned URL and visit `/api/health` to check database connectivity. In the app, use **Open Source** to find an issue, import a public repository, and verify that the worker completes the scan. Open **Decision history** to check that the answer links to evidence or reports insufficient context.
+
+The free web service can spin down between visits. The free database expires 30 days after creation. For a persistent launch, choose paid service and database plans in Render and verify the production setup below. [Render free-plan limits](https://render.com/docs/free)
+
+Core features require no additional provider secrets. Add optional integrations in the Render service's **Environment** settings. For GitHub sign-in, register the assigned HTTPS origin plus `/api/auth/github/callback` as the OAuth callback. For Neo4j, set the Aura connection values documented in the [environment guide](ENVIRONMENT.md) and check an answer with **Use Neo4j for this question**. For a custom domain, set `APP_ORIGIN` to the exact HTTPS origin visitors use and update the OAuth callback to match.
+
+## Persistent deployment
 
 1. Build the root Dockerfile. Deploy the API and static web app behind one HTTPS reverse proxy. Set `APP_ORIGIN` to the public URL and use PostgreSQL over TLS. Apply a request size cap, per-IP limits for session creation and imports, and an API timeout longer than the evaluator request timeout.
 2. Run `python -m skillforge.migrate` as a one-off schema task with a privileged database role. Run the API and scan worker with a separate role that has table access. The production API verifies the schema revision at startup.
@@ -47,7 +55,7 @@ The [Render Blueprint](../render.yaml) creates a free web service and a free Pos
 
 The implementation covers public GitHub import and opt-in connected selection, bounded static structure analysis for JavaScript, TypeScript and Python, adaptive repository scoring, practice scoring and portfolio planning. See [adaptive scoring](SCORING.md) for score interpretation and limits. Dynamic dispatch and provider history outside the sample are outside graph coverage. The editor drafts stay in tab memory.
 
-The current database stores graph metadata in the scan snapshot. Neo4j projection, private repository access, Google and email sign-in, resume extraction, the full legacy career simulation suite, and legacy data migrations remain follow-up work. Keep the inherited inventory as a roadmap and confirm environment and provider choices before enabling those features.
+The current database stores graph metadata in the scan snapshot. Decision context can use a temporary Neo4j projection when configured. Private repository access, Google and email sign-in, resume extraction, the full legacy career simulation suite, and legacy data migrations remain follow-up work. Keep the inherited inventory as a roadmap and confirm environment and provider choices before enabling those features.
 
 ## Operational checks
 

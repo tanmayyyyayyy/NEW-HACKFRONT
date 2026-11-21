@@ -4,6 +4,8 @@ SkillForge Integrated helps students, developers, and working professionals rank
 
 The workspace includes public GitHub scans, an interactive code graph, project-aware repository rankings, scenario coding tests, and a portfolio and learning plan. Read the [configuration and deployment guide](docs/OPERATIONS.md) to run the app and enable live integrations.
 
+[Deploy NEW-HACKFRONT to Render](https://render.com/deploy?repo=https://github.com/tanmayyyyayyy/NEW-HACKFRONT) to create the app and PostgreSQL database from the Blueprint. The included free plan is for demos. See the [Render setup and smoke checks](docs/OPERATIONS.md#deploy-to-render).
+
 Double-click [Run-SkillForge.bat](Run-SkillForge.bat) on Windows or [Run-SkillForge.command](Run-SkillForge.command) on macOS to build and open the local app. Both launchers need Node.js 22.12 or newer and uv.
 
 - [Product requirements](docs/PRD.md)

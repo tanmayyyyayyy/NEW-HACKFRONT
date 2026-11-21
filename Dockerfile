@@ -13,6 +13,7 @@ ENV UV_PYTHON_DOWNLOADS=never PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY services/pyproject.toml services/uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
 COPY services/skillforge/ ./skillforge/
+COPY --chmod=755 scripts/start-render.sh /usr/local/bin/skillforge-start
 COPY --from=frontend /build/dist /app/apps/web/dist
 ENV PATH="/app/services/.venv/bin:$PATH" APP_ENV=production SCAN_WORKER_ENABLED=false
 RUN useradd --system --uid 10001 --no-create-home skillforge
