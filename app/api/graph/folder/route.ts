@@ -5,6 +5,7 @@ import { matchesAppOrigin } from "@/lib/app-origin";
 import { configuredAppUrl } from "@/lib/site-url";
 import { withQueryBudget } from "@/lib/query-budget";
 import { graphModel, sourceFileLimit, treeEntryLimit } from "@/lib/graph-model";
+import { knowledgeRiskAreas } from "@/lib/knowledge-risk";
 import { persistRepositoryGraph } from "@/lib/repository-graph";
 import { driver } from "@/lib/neo4j";
 
@@ -35,7 +36,13 @@ export async function GET(request: Request) {
         "MATCH (g:SkillForgeGraph {key: $key}) RETURN g.snapshot AS snapshot ORDER BY g.indexedAt DESC LIMIT 1",
         { key }, { database, routing: "READ" },
       );
-      return result.records.length ? reply(JSON.parse(result.records[0].get("snapshot"))) : reply({ error: "Saved folder not found." }, 404);
+      if (!result.records.length) return reply({ error: "Saved folder not found." }, 404);
+      const snapshot = JSON.parse(result.records[0].get("snapshot"));
+      if (snapshot.riskMapVersion !== 1) {
+        snapshot.riskAreas = knowledgeRiskAreas(snapshot.nodes.filter((node: { kind: string }) => node.kind === "file").map((node: { detail: string }) => node.detail));
+        snapshot.riskMapVersion = 1;
+      }
+      return reply(snapshot);
     }
     const prefix = JSON.stringify(["folder", session.user.id]).slice(0, -1) + ",";
     const result = await driver.executeQuery(
@@ -87,7 +94,10 @@ export async function POST(request: Request) {
       });
       paths.forEach(model.file);
       for (const item of imports) model.imports(item.path, item.specs);
-      return reply(await persistRepositoryGraph(JSON.stringify(["folder", session.user.id, name]), model.finish()));
+      const graph = model.finish();
+      graph.riskAreas = knowledgeRiskAreas(paths);
+      graph.riskMapVersion = 1;
+      return reply(await persistRepositoryGraph(JSON.stringify(["folder", session.user.id, name]), graph));
     } catch {
       return reply({ error: "The folder could not be indexed. Check Neo4j and try again." }, 503);
     }

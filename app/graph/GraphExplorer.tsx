@@ -3,25 +3,23 @@
 import { useMemo, useState, type FormEvent } from "react";
 import type { GraphEdge, GraphNode, RepositoryGraph } from "../../lib/graph-types";
 import { importSpecifiers, sourceFileLimit, sourceFilePattern, treeEntryLimit } from "../../lib/graph-model";
+import { RepositoryGraph3D } from "./RepositoryGraph3D";
 
-type View = "files" | "imports" | "history" | "conflicts";
+type View = "files" | "imports" | "history" | "conflicts" | "risk";
 const views: { id: View; label: string; empty: string }[] = [
   { id: "files", label: "File structure", empty: "No files or folders available." },
   { id: "imports", label: "Module imports", empty: "No static JavaScript or TypeScript imports were found in the scanned files." },
   { id: "history", label: "Decision history", empty: "No pull requests or commits were found in the indexed history." },
   { id: "conflicts", label: "Decision conflicts", empty: "No linked decision updates were found in the indexed pull request history." },
+  { id: "risk", label: "Knowledge risk map", empty: "No source modules were available to map." },
 ];
-const labels: Record<GraphEdge["kind"], string> = {
-  CONTAINS: "Contains", IMPORTS: "Imports", PARENT: "Parent commit", INCLUDES: "Includes commit",
-  REFERENCES: "References", SUPERSEDES: "Supersedes",
-};
-const perLane = 7;
 const ignoredFolders = new Set([".git", "node_modules", ".next", "dist", "build", "coverage"]);
 
 function belongs(edge: GraphEdge, view: View) {
   if (view === "files") return edge.kind === "CONTAINS";
   if (view === "imports") return edge.kind === "IMPORTS";
   if (view === "conflicts") return edge.kind === "SUPERSEDES";
+  if (view === "risk") return edge.kind === "COVERS";
   return edge.kind !== "CONTAINS" && edge.kind !== "IMPORTS";
 }
 
@@ -44,12 +42,21 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const [view, setView] = useState<View>("files");
   const [focus, setFocus] = useState("");
   const [search, setSearch] = useState("");
-  const [zoom, setZoom] = useState(100);
-  const [page, setPage] = useState(0);
   const [nodeLimit, setNodeLimit] = useState(36);
   const [overridesOnly, setOverridesOnly] = useState(false);
 
   const { nodes, edges, byId } = useMemo(() => {
+    if (view === "risk") {
+      const areas = graph?.riskAreas ?? [];
+      const folders = new Map(graph?.nodes.filter(node => node.kind === "folder").map(node => [node.detail.replace(/\/$/, ""), node]) ?? []);
+      const riskNodes: GraphNode[] = areas.map(area => ({ id: "risk:" + area.id, label: area.name,
+        detail: area.path + " · " + area.signals.length + " risk signals", kind: "risk", risk: area }));
+      const riskEdges: GraphEdge[] = areas.flatMap(area => folders.has(area.path)
+        ? [{ from: "risk:" + area.id, to: folders.get(area.path)!.id, kind: "COVERS" as const }] : []);
+      const linkedFolders = new Set(riskEdges.map(edge => edge.to));
+      const visibleNodes = [...riskNodes, ...(graph?.nodes.filter(node => linkedFolders.has(node.id)) ?? [])];
+      return { nodes: visibleNodes, edges: riskEdges, byId: new Map(visibleNodes.map(node => [node.id, node])) };
+    }
     const edges = graph?.edges.filter(edge => belongs(edge, view) && (!overridesOnly || view !== "history" || edge.kind === "SUPERSEDES")) ?? [];
     const ids = new Set(edges.flatMap(({ from, to }) => [from, to]));
     const nodes = graph?.nodes.filter(node => {
@@ -72,18 +79,11 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const selected = byId.get(focus) ?? (view === "files" ? nodes[0] : byId.get(edges[0]?.from) ?? nodes[0]);
   const incoming = selected ? edges.filter(edge => edge.to === selected.id) : [];
   const outgoing = selected ? edges.filter(edge => edge.from === selected.id) : [];
-  const left = incoming.slice(page * perLane, (page + 1) * perLane);
-  const right = outgoing.slice(page * perLane, (page + 1) * perLane);
-  const rows = Math.max(left.length, right.length, 1);
-  const height = Math.max(296, rows * 72 + 100);
-  const middle = height / 2;
-  const rowY = (index: number, count: number) => middle + (index - (count - 1) / 2) * 72;
   const selectedView = views.find(item => item.id === view)!;
-  const headings = view === "files" ? ["Parent folder", "Contents"] : view === "imports" ? ["Imported by", "Imports"] : view === "conflicts" ? ["Newer decision", "Earlier decision"] : ["Incoming links", "Outgoing links"];
+  const riskAreas = graph?.riskAreas ?? [];
 
   function inspect(id: string) {
     setFocus(id);
-    setPage(0);
   }
 
   function changeView(id: View) {
@@ -109,7 +109,6 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
       if (!response.ok) throw new Error(result.error || "The repository could not be indexed.");
       setGraph(result);
       changeView("files");
-      setZoom(100);
       setOverridesOnly(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The repository could not be indexed.");
@@ -144,7 +143,6 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
       if (!response.ok) throw new Error(result.error || "The folder could not be indexed.");
       setGraph(result);
       changeView("files");
-      setZoom(100);
       setOverridesOnly(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The folder could not be indexed.");
@@ -168,7 +166,6 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
       if (name) {
         setGraph(result);
         changeView("files");
-        setZoom(100);
         setOverridesOnly(false);
       } else {
         setSavedFolders(result.folders);
@@ -176,15 +173,6 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Saved folders are unavailable.");
     } finally { setBusy(false); }
-  }
-
-  function nodeButton(node: GraphNode, x?: number, y?: number, edge?: GraphEdge) {
-    return <button type="button" key={edge ? edge.kind + node.id : node.id} className={"graph-node graph-" + node.kind}
-      style={x === undefined ? undefined : { left: x + "%", top: y }} aria-pressed={node.id === selected?.id} onClick={() => inspect(node.id)}>
-      <small>{edge ? labels[edge.kind] : node.kind}</small>
-      <strong title={node.detail}>{node.label}</strong>
-      {node.kind === "pull" || node.kind === "commit" ? <span title={node.detail}>{node.detail}</span> : null}
-    </button>;
   }
 
   return <>
@@ -221,12 +209,12 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
       </div>
     </form>}
     {status && <p role="alert" className="graph-notice sf-error">{status}</p>}
-    {busy && <p role="status" className="graph-notice graph-progress">{source === "github" ? "Reading GitHub structure and history, then storing the index in Neo4j." : "Reading the folder and storing its graph in Neo4j."}</p>}
+    {busy && <p role="status" className="graph-notice graph-progress">{source === "github" ? "Reading GitHub structure and a sample of history, then mapping documentation and ownership signals." : "Reading the folder and mapping documentation signals."}</p>}
     {graph && <section className="graph-workbench" aria-label="Indexed repository">
       <header className="graph-bar">
         <div><strong>{graph.repository}</strong> <code>{graph.revision.slice(0, 8)}</code></div>
         <nav className="workspace-modes" aria-label="Graph view">
-          {views.map(item => <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => changeView(item.id)}>{item.label}{item.id === "conflicts" && conflictEdges.length > 0 ? ` · ${conflictEdges.length}` : ""}</button>)}
+          {views.map(item => <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => changeView(item.id)}>{item.label}{item.id === "conflicts" && conflictEdges.length > 0 ? ` · ${conflictEdges.length}` : item.id === "risk" && riskAreas.length > 0 ? ` · ${riskAreas.length}` : ""}</button>)}
         </nav>
       </header>
       <div className="graph-layout">
@@ -236,6 +224,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
           {view === "history" && <label className="sf-check"><input type="checkbox" checked={overridesOnly}
             onChange={event => { setOverridesOnly(event.target.checked); inspect(""); }} />Superseded decisions only</label>}
           {view === "conflicts" && <p className="conflict-hint">Later merged PRs that explicitly replace an earlier PR or describe a changed default, behavior, approach, or architecture while referencing it.</p>}
+          {view === "risk" && <p className="conflict-hint">Color and size reflect the number and severity of evidence based risk signals.</p>}
           {!lookup && imported.length > 0 && <div className="graph-highlights">
             <small>Most imported in this scan</small>
             {imported.map(item => <button key={item.id} type="button" onClick={() => inspect(item.id)}>
@@ -250,6 +239,25 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
           {matches.length > nodeLimit && <button type="button" onClick={() => setNodeLimit(limit => limit + 36)}>Show more nodes</button>}
         </aside>
         <div className="graph-stage">
+          {view === "risk" && <section className="risk-overview" aria-label="Institutional knowledge risk summary">
+            <div className="risk-overview-heading"><span className="risk-radar" aria-hidden="true">◎</span><div><small>INSTITUTIONAL KNOWLEDGE SCAN</small>
+              <h3>{riskAreas.length ? `${riskAreas.length} areas to review` : "No risk signals found"}</h3>
+              <p>{riskAreas.filter(area => area.signals.length > 1).length} areas have multiple risk signals in the indexed evidence.</p></div></div>
+            {graph?.source === "folder" && <p className="risk-coverage-note">This folder scan can assess documentation structure. Contributor and decision history need a GitHub index.</p>}
+            {graph?.source !== "folder" && <p className="risk-coverage-note">Contributor and decision signals use up to 12 recent pull requests. Older activity may not appear in this sample.</p>}
+            <div className="risk-cards">
+              {riskAreas.slice(0, 6).map(area => <article className="risk-card" key={area.id}>
+                <div className="risk-card-top"><strong>{area.path}</strong><span className={area.riskScore >= 0.7 ? "risk-high" : area.riskScore >= 0.35 ? "risk-medium" : "risk-watch"}>{area.riskScore >= 0.7 ? "Elevated" : area.riskScore >= 0.35 ? "Review" : "Watch"}</span></div>
+                <p>{area.sourceFiles} source files · {area.documentationFiles} docs · {area.sampledPullRequests} sampled PRs</p>
+                {area.topContributor ? <><p>{area.contributors} observed contributors · {area.decisionConnections} PRs with linked decisions</p>
+                  <p>Top contributor <b>@{area.topContributor}</b> · {Math.round(area.topContributorShare * 100)}% of sampled PRs</p></>
+                  : <p>Contributor history unavailable · {area.decisionConnections} linked decisions</p>}
+                <ul>{area.signals.map(signal => <li key={signal}>{signal}</li>)}</ul>
+                <button type="button" onClick={() => inspect("risk:" + area.id)}>Locate in 3D map <span aria-hidden="true">↗</span></button>
+              </article>)}
+            </div>
+            {riskAreas.length === 0 && <p className="graph-notice">The scan found no modules matching the current risk signals.</p>}
+          </section>}
           {view === "conflicts" && conflictEdges.length > 0 && <section className="conflict-list" aria-label="Detected decision conflicts">
             <div className="conflict-list-heading"><span className="conflict-spark" aria-hidden="true">✳</span><div><h3>Decisions that changed</h3><p>Each pair is linked by an explicit reference in the newer pull request.</p></div></div>
             {conflictEdges.map(edge => {
@@ -272,44 +280,12 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
           </section>}
           <div className="graph-tools">
             <h2>{selectedView.label}</h2>
-            <div className="graph-zoom" aria-label="Diagram zoom">
-              <button type="button" aria-label="Zoom out" disabled={zoom <= 65} onClick={() => setZoom(value => Math.max(65, value - 15))}>−</button>
-              <button type="button" aria-label="Reset zoom" onClick={() => setZoom(100)}>{zoom}%</button>
-              <button type="button" aria-label="Zoom in" disabled={zoom >= 160} onClick={() => setZoom(value => Math.min(160, value + 15))}>+</button>
-            </div>
           </div>
           {selected ? <>
-            <div className="graph-viewport" tabIndex={0} aria-label="Scrollable repository diagram">
-              <div className="graph-canvas" style={{ height, minWidth: 620, width: Math.max(100, zoom) + "%", zoom: zoom < 100 ? zoom / 100 : undefined }}>
-                <div className="graph-lanes"><span>{headings[0]}</span><span>Selected node</span><span>{headings[1]}</span></div>
-                <svg className="graph-wires" viewBox={`0 0 1000 ${height}`} preserveAspectRatio="none" aria-hidden="true">
-                  <defs><marker id="graph-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-                    <path d="m2 1 4 3-4 3" />
-                  </marker></defs>
-                  {left.map((edge, i) => <path key={edge.kind + edge.from} className={edge.kind === "SUPERSEDES" ? "wire-override" : ""}
-                    markerEnd="url(#graph-arrow)" d={`M 180 ${rowY(i, left.length)} C 290 ${rowY(i, left.length)} 305 ${middle} 365 ${middle}`} />)}
-                  {right.map((edge, i) => <path key={edge.kind + edge.to} className={edge.kind === "SUPERSEDES" ? "wire-override" : ""}
-                    markerEnd="url(#graph-arrow)" d={`M 500 ${middle} C 610 ${middle} 618 ${rowY(i, right.length)} 684 ${rowY(i, right.length)}`} />)}
-                </svg>
-                {left.map((edge, i) => nodeButton(byId.get(edge.from)!, 18, rowY(i, left.length), edge))}
-                {nodeButton(selected, 50, middle)}
-                {right.map((edge, i) => nodeButton(byId.get(edge.to)!, 82, rowY(i, right.length), edge))}
-              </div>
-            </div>
-            <div className="graph-compact" aria-label="Repository diagram">
-              {left.length > 0 && <div className="graph-compact-lane"><small>{headings[0]}</small>
-                {left.map(edge => nodeButton(byId.get(edge.from)!, undefined, undefined, edge))}</div>}
-              <div className="graph-compact-lane"><small>Selected node</small>{nodeButton(selected)}</div>
-              {right.length > 0 && <div className="graph-compact-lane"><small>{headings[1]}</small>
-                {right.map(edge => nodeButton(byId.get(edge.to)!, undefined, undefined, edge))}</div>}
-            </div>
+            <RepositoryGraph3D nodes={nodes} edges={edges} selectedId={selected.id} onSelect={inspect} />
             <div className="graph-inspector">
               <div><strong>{selected.detail}</strong><small>{incoming.length} incoming · {outgoing.length} outgoing</small></div>
               {selected.url && <a href={selected.url} target="_blank" rel="noreferrer">View on GitHub <span className="arrow" aria-hidden="true" /></a>}
-              {Math.max(incoming.length, outgoing.length) > perLane && <div className="graph-zoom">
-                <button type="button" disabled={page === 0} onClick={() => setPage(value => value - 1)}>Previous links</button>
-                <button type="button" disabled={(page + 1) * perLane >= Math.max(incoming.length, outgoing.length)} onClick={() => setPage(value => value + 1)}>More links</button>
-              </div>}
             </div>
           </> : <p className="graph-notice">{graph.source === "folder" && view === "history" ? "Connect the GitHub repository to see pull requests and commit history." : overridesOnly && view === "history" ? "No explicit supersession was found in the indexed pull requests." : selectedView.empty}</p>}
         </div>

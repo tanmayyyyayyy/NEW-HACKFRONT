@@ -8,12 +8,15 @@ A new maintainer opens Futon and finds that the reader waits for chapter updates
 
 ## Repository graph
 
-Open **Graph** and index a GitHub repository URL or a local folder. SkillForge stores each index in Neo4j and shows three ways to explore it:
+Open **Graph** and index a GitHub repository URL or a local folder. SkillForge stores each index in Neo4j and shows five ways to explore it in an interactive 3D graph:
 
 - **File structure** shows folders, their parent, and their contents.
 - **Module imports** shows statically detected imports between JavaScript and TypeScript files and external packages. It samples up to 18 source files and recognizes relative imports and conventional `@/` paths. Runtime calls and custom compiler aliases can be missing.
 - **Decision history** shows recent pull requests, commits, commit parents, and explicit references between them. Use **Superseded decisions only** to see explicit replacement declarations from merged PRs.
 - **Decision conflicts** pairs a later merged pull request with the earlier PR it names. Each pair shows available authors, merge dates, the original PR text, and links to both records. The detector looks for explicit replacement language or a stated change to the default, behavior, approach, or architecture alongside a PR reference. It does not infer conflicts from similar wording alone.
+- **Knowledge risk map** groups source files into modules and surfaces sparse rationale documentation, contributor concentration, and missing links between sampled pull requests. GitHub ownership signals come from up to 12 recent PR file lists; local folders can show documentation gaps but do not include historical contributors or decisions. Risk signals are a triage aid based on the sampled index, not a code quality or personnel assessment.
+
+Drag the 3D graph to orbit and use the on-canvas controls or arrow keys to rotate and zoom. The node list remains available for keyboard selection and when WebGL is unavailable.
 
 Choose a node, search by name or path, and zoom the diagram. GitHub nodes link to their source. Private repositories require sign-in and a scoped read token. Local folder indexing also requires sign-in. It sends file paths and detected imports, skips common build folders and environment files, and leaves GitHub history to the GitHub importer. On public deployments, set `APP_ORIGIN` to the public HTTPS origin so robots and sitemap metadata point to the correct host.
 
