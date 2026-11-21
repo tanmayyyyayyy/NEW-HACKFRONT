@@ -1,4 +1,6 @@
 import { githubTokenSignIn } from "./github-token-signin";
+import { trustedAppOrigins } from "./app-origin";
+import { siteOrigin } from "./site-url";
 import { betterAuth } from "better-auth";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
@@ -23,19 +25,17 @@ async function sendMail(email: string, subject: string, url: string) {
 }
 
 async function initialize() {
-  const baseURL =
-    process.env.APP_ORIGIN ||
-    process.env.RENDER_EXTERNAL_URL ||
-    (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : "http://localhost:3000");
-  const secret = process.env.BETTER_AUTH_SECRET || "skillforge_production_better_auth_secret_minimum_32_characters";
+  const baseURL = siteOrigin();
+  const secret = process.env.BETTER_AUTH_SECRET;
   if (!baseURL || !secret || secret.length < 32) throw new Error("Configure the account origin and secret.");
   const file = process.env.ACCOUNT_DATABASE || ".local/accounts.sqlite";
-  mkdirSync(dirname(file), { recursive: true, mode: 0o777 });
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const database = new DatabaseSync(file);
   database.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000");
   const methods = loginMethods();
   const options = {
     appName: "SkillForge", baseURL, secret, database,
+    trustedOrigins: trustedAppOrigins(baseURL),
     plugins: [githubTokenSignIn],
     account: { encryptOAuthTokens: true },
     rateLimit: { enabled: true, storage: "database" as const },

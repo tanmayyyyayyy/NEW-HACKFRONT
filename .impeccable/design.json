@@ -1,0 +1,15 @@
+{
+  "name": "SkillForge",
+  "font": { "interface": "Geist", "code": "ui-monospace" },
+  "colors": {
+    "canvas": "#111115",
+    "surface": "#19191f",
+    "raised": "#222229",
+    "border": "#35343d",
+    "foreground": "#f6f1ed",
+    "muted": "#b6adb2",
+    "accent": "#ffab80"
+  },
+  "motion": { "traceSelectionMs": 300, "respectReducedMotion": true },
+  "implementation": "app/globals.css"
+}

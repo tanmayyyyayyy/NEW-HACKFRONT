@@ -1,4 +1,5 @@
 FROM node:24-bookworm-slim AS build
+ARG APP_ORIGIN
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -12,6 +13,7 @@ COPY --from=build /app/.next ./.next
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json /app/next.config.mjs ./
 COPY --from=build /app/data ./data
-RUN mkdir -p /app/.local /var/data && chown -R node:node /app/.local /var/data && chmod 777 /app/.local /var/data 2>/dev/null || true
+COPY --from=build /app/public ./public
+RUN install -d -m 0700 -o node -g node /app/.local /var/data
 USER node
 CMD ["sh","-c","exec ./node_modules/.bin/next start --hostname 0.0.0.0 --port \"$PORT\""]

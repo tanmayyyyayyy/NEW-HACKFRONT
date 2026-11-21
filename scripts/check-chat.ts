@@ -6,6 +6,7 @@ import { accounts } from "../lib/auth";
 import { verifiedTestSession } from "./account-fixture";
 let cookie = "";
 const actualFetch = globalThis.fetch;
+const originalPublicToken = process.env.GITHUB_PUBLIC_READ_TOKEN;
 const server = "http://localhost:3000";
 const ask = (question: string, settings = {}, token?: string) => POST(new Request(server + "/api/ask", {
   method: "POST",
@@ -26,6 +27,11 @@ try {
   assert(follow.evidence[0].record.files.length > 0);
   assert.equal(follow.matchBasis,"Selected conversation sources");
   assert(!JSON.stringify(follow.evidence).includes('"#146"'));
+  const beforeMerge = await (await ask("Why did #146 replace #112?", { throughDate: "2026-11-18" })).json();
+  const proposal = beforeMerge.evidence.find(({ record }: { record: { id: string } }) => record.id === "#146");
+  assert.equal(proposal.record.kind, "PR");
+  assert.equal(proposal.record.date.slice(0, 10), "2026-11-16");
+  assert(!proposal.links.some(({ kind }: { kind: string }) => kind === "SUPERSEDES"));
   assert.equal((await ask("Who recorded this?",{ throughDate:"2026-02-30" })).status,400);
   const unknown = await (await ask("Why does Futon use Kubernetes for billing?")).json();
   assert.equal(unknown.evidence?.length, 0);
@@ -33,6 +39,10 @@ try {
   process.env.SARVAM_API_KEY = "fixture";
   let sentToSarvam = 0;
   let authorized = true;
+  let publicRepositoryVisible = true;
+  const publicHistoryRequests = new Map<string, number>();
+  const publicToken = "fixture_public_token";
+  process.env.GITHUB_PUBLIC_READ_TOKEN = publicToken;
   const privateToken = "github_pat_" + "fixture".repeat(4);
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
@@ -43,16 +53,41 @@ try {
     }
     assert.equal(url.hostname, "api.github.com");
     const credential = new Headers(init?.headers).get("authorization");
-    if (!authorized || !(["Bearer fixture_read_token", "Bearer " + privateToken].includes(credential || ""))) return Response.json({}, { status: 404 });
-    if (url.pathname === "/user") return Response.json({ id:15420,login:"private-fixture" });
-    if (url.pathname === "/repos/example/public") return Response.json({ private:false, full_name:"example/public" });
-    if (url.pathname === "/repos/example/internal") return Response.json({ private: true, full_name: "example/internal" });
+    if (credential === "Bearer " + publicToken) {
+      assert(url.pathname.startsWith("/repos/example/public"));
+      if (url.pathname === "/repos/example/public") {
+        return Response.json({ private: !publicRepositoryVisible, full_name: "example/public" });
+      }
+      publicHistoryRequests.set(url.pathname, (publicHistoryRequests.get(url.pathname) ?? 0) + 1);
+    } else {
+      if (!authorized || !(["Bearer fixture_read_token", "Bearer " + privateToken].includes(credential || ""))) return Response.json({}, { status: 404 });
+      if (url.pathname === "/user") return Response.json({ id:15420,login:"private-fixture" });
+      if (url.pathname === "/repos/example/public") return Response.json({ private:false, full_name:"example/public" });
+      if (url.pathname === "/repos/example/internal") return Response.json({ private: true, full_name: "example/internal" });
+    }
     if (url.pathname.endsWith("/pulls")) return Response.json([{
       number: 12, title: "Guard sync retries", body: "Prevent duplicate writes during sync retries.",
       user: { login: "fixture" }, created_at: "2025-01-01", merged_at: "2025-01-02",
     }]);
     return Response.json([]);
   };
+  const publicPath = { repo: "example/public" };
+  const publicQuestions = await Promise.all([
+    ask("Why sync retries? Trace #12.", { ...publicPath, throughDate: "2025-01-01" }),
+    ask("Why avoid duplicate writes in #12?", publicPath),
+  ]);
+  assert.equal(publicQuestions[0].status, 200);
+  assert.equal(publicQuestions[1].status, 200);
+  const publicProposal = (await publicQuestions[0].json()).evidence[0].record;
+  assert.equal(publicProposal.kind, "PR");
+  assert.equal(publicProposal.date, "2025-01-01");
+  assert.equal((await publicQuestions[1].json()).evidence[0].record.kind, "Merged PR");
+  assert.equal((await ask("Why sync retries? Trace #12.", publicPath)).status, 200);
+  assert.equal(publicHistoryRequests.size, 5);
+  assert([...publicHistoryRequests.values()].every(count => count === 1));
+  publicRepositoryVisible = false;
+  assert.equal((await ask("Why sync retries?", publicPath)).status, 403);
+
   const privatePath = { mode: "private", repo: "example/internal" };
   assert.equal((await ask("Why sync retries?", privatePath)).status, 401);
   const auth = await accounts();
@@ -83,8 +118,10 @@ try {
   assert.equal((await ask("Why sync retries?", privatePath, "fixture_read_token")).status, 401);
   const saved = await driver.executeQuery("MATCH (r:SkillForgeChatRun) RETURN count(r) AS count");
   assert.equal(saved.records[0].get("count").toNumber(), 0);
-  console.log("Public citations, overrides, abstention, private authorization/revocation, Sarvam opt-in and rollback passed.");
+  console.log("Public citations, cutoff, overrides, caching, abstention, private authorization/revocation, Sarvam opt-in and rollback passed.");
 } finally {
   globalThis.fetch = actualFetch;
+  if (originalPublicToken === undefined) delete process.env.GITHUB_PUBLIC_READ_TOKEN;
+  else process.env.GITHUB_PUBLIC_READ_TOKEN = originalPublicToken;
   await driver.close();
 }

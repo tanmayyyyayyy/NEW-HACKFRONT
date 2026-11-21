@@ -6,6 +6,16 @@ A new maintainer opens Futon and finds that the reader waits for chapter updates
 
 [Quick start](#quick-start) · [Demo questions](#try-three-questions) · [Private access](#private-team-handover) · [Graph and AI](#how-an-answer-is-built) · [API](#query-api) · [Testing](#testing) · [Deployment](#deploying-on-render)
 
+## Repository graph
+
+Open **Graph** and index a GitHub repository URL or a local folder. SkillForge stores each index in Neo4j and shows three ways to explore it:
+
+- **File structure** shows folders, their parent, and their contents.
+- **Module imports** shows statically detected imports between JavaScript and TypeScript files and external packages. It samples up to 18 source files and recognizes relative imports and conventional `@/` paths. Runtime calls and custom compiler aliases can be missing.
+- **Decision history** shows recent pull requests, commits, commit parents, and explicit references between them. Use **Superseded decisions only** to see explicit replacement declarations from merged PRs.
+
+Choose a node, search by name or path, and zoom the diagram. GitHub nodes link to their source. Private repositories require sign-in and a scoped read token. Local folder indexing also requires sign-in. It sends file paths and detected imports, skips common build folders and environment files, and leaves GitHub history to the GitHub importer. On public deployments, set `APP_ORIGIN` to the public HTTPS origin so robots and sitemap metadata point to the correct host.
+
 ## Quick start
 
 Use Node.js 24, npm and a running Neo4j instance. Docker is convenient for the local database. Run the following in a POSIX shell on a fresh checkout.
@@ -31,10 +41,12 @@ docker run -d --name skillforge-neo4j \
   -p 127.0.0.1:7687:7687 \
   -e NEO4J_AUTH=neo4j/whygraph-local \
   neo4j:5.26.27-community
-npm run dev
+npm start
 ```
 
-Open [localhost:3000](http://localhost:3000). Choose **Trace library → Investigate this trace → Ask about this repo**. The bundled Futon snapshot lets you try real graph retrieval immediately. Sarvam, OAuth, mail delivery and the offline extraction pipeline are optional for this walkthrough. Check database connectivity at [the health endpoint](http://localhost:3000/api/health).
+Keep the local server running while you edit. Both `npm start` and `npm run dev` enable Fast Refresh on save. To preview a production build locally, run `npm run build` followed by `npm run start:prod`.
+
+Open [localhost:3000](http://localhost:3000) and choose **Try a real decision** to see a guided trace. The trace is available without an account, Neo4j, or an AI provider. Choose **Run this question in the workspace** and submit it to query the bundled Futon snapshot through Neo4j. Sarvam, OAuth, mail delivery and the offline extraction pipeline are optional for this walkthrough. Check database connectivity at [the health endpoint](http://localhost:3000/api/health).
 
 ## Try three questions
 
@@ -66,8 +78,8 @@ flowchart LR
     GitHub --> Graph
     Graph --> Trail[Ranked records and relationships]
     Trail --> UI
-    Trail -->|User opts in| Sarvam[Sarvam explanation]
-    Sarvam --> UI
+    Trail -->|User opts in| Explain[Sarvam or OpenRouter]
+    Explain --> UI
 ```
 
 **1. Collect a bounded sample.** Live retrieval requests up to 20 recently updated closed PRs, 20 issue-list entries and 12 recent commits. Up to three referenced threads can trigger further requests for comments and, for PRs, changed file paths. The Futon demo uses its bundled snapshot and can also trace captured changes to Android preference keys. Coverage varies with the question and source. [History collector and graph query](lib/repository-chat.ts)
@@ -82,11 +94,11 @@ flowchart LR
 
 **3. Retrieve the trail.** Parameterized Cypher prioritizes explicit issue or PR references. Without a reference, the query requires at least two overlapping search terms and a minimum weighted score. It returns up to five records with up to eight related entries per record. The UI shows the match basis, sampled record count, source links and retrieval query. The match basis describes how the source was found. It does not measure the probability that an explanation is true. The transaction rolls back after retrieval, so the database user needs write access even for the demo.
 
-**4. Explain with consent.** If the user checks **Let Sarvam explain the answer**, the server can send the question and selected evidence to `sarvam-105b` for an English, Hindi or Hinglish explanation. The prompt includes bounded excerpts and relevant metadata such as author, date and file paths. The UI labels the generated summary separately and retains the original sources if the provider fails. Empty retrieval skips the model call. [Query and model boundary](app/api/ask/route.ts)
+**4. Explain with consent.** If the user checks **Let AI explain the evidence**, the server can send the question and selected evidence to Sarvam for an English, Hindi or Hinglish explanation. If Sarvam fails and OpenRouter is configured, the server tries the same evidence there. The UI names the provider that answered and keeps GitHub sources available when both fail. Empty retrieval skips both providers. The browser can also dictate questions and read prompts or explanations aloud when its speech services support them. [Query and model boundary](app/api/ask/route.ts)
 
 ### Where the evidence stops
 
-GitHub history can establish what someone wrote, which files changed and when two recorded decisions conflict. A PR author may differ from the person who chose the design. An undocumented conversation or a loosely worded reversal may leave no detectable relationship. A date cutoff filters sampled record dates; edited PR descriptions still reflect their retrieved text. Use explicit PR numbers, code identifiers or English search terms for the most reliable retrieval. Multilingual generation applies to the explanation.
+GitHub history can establish what someone wrote, which files changed and when two recorded decisions conflict. A PR author may differ from the person who chose the design. An undocumented conversation or a loosely worded reversal may leave no detectable relationship. A date cutoff includes a sampled PR from its opening date and marks it merged once its merge date falls within the cutoff. Descriptions and changed-file lists still reflect the retrieved version. Use explicit PR numbers, code identifiers or English search terms for the most reliable retrieval. Multilingual generation applies to the explanation.
 
 ## Query API
 
@@ -115,7 +127,9 @@ The response includes `evidence[].record`, relationship entries in `evidence[].l
 | `APP_ORIGIN`, `BETTER_AUTH_SECRET` | Exact browser origin and a stable, high-entropy secret of at least 32 characters for account operations. |
 | `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `NEO4J_DATABASE` | Graph connection. Use the authenticated TLS URI for a hosted database. The database name defaults to `neo4j`. |
 | `ACCOUNT_DATABASE` | SQLite file for account data and sessions. Defaults to `.local/accounts.sqlite`. Use a persistent writable volume on the host. |
+| `GITHUB_PUBLIC_READ_TOKEN` | Optional server-side token for live public history. Use a dedicated GitHub account with read access only to public repositories. Public results can be reused for up to two minutes per process. Private queries use the engineer's own token and check GitHub on every request. |
 | `SARVAM_API_KEY` | Optional server-side key for consented explanations. Restart the server after changing it. |
+| `OPEN_ROUTER_API_KEY` | Optional server-side fallback key. Uses `openai/gpt-4.1-mini` through OpenRouter when Sarvam cannot produce an explanation. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | Optional GitHub OAuth credentials. Register the callback at `<APP_ORIGIN>/api/auth/callback/github`. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional Google OAuth credentials. Register `<APP_ORIGIN>/api/auth/callback/google`. |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Optional verified sender for signup verification and password recovery. |
@@ -162,12 +176,12 @@ Live OAuth callbacks, real email delivery, organization token approval and Sarva
 
 ## Deploying on Render
 
-The root Blueprint provisions a **paid Starter web instance and persistent disk**. Review the plan before applying it. The Docker image runs the Next.js production server as the `node` user and stores account data at `/var/data/accounts.sqlite`. [Render Blueprint](render.yaml) · [Dockerfile](Dockerfile)
+The root Blueprint provisions a **free web service**. The Docker image runs Next.js as the `node` user and stores accounts in `.local/accounts.sqlite`. Render can discard that file on redeploy or restart. For durable accounts, use a plan with a persistent disk and set `ACCOUNT_DATABASE` to a path on that disk. [Render Blueprint](render.yaml) · [Dockerfile](Dockerfile)
 
 1. Connect this repository as a Blueprint and select the root `render.yaml`.
 2. Set the exact HTTPS origin and Neo4j credentials. Render generates the account secret. Keep it stable across deployments.
-3. Add the optional provider keys you intend to use and register OAuth callbacks against the deployed origin.
-4. Open `/api/health` to check Neo4j connectivity. Then run the three public demo questions, a private sign-in and a revoked-access check. A healthy graph alone does not verify login, mail or AI delivery.
+3. Add the optional provider keys you intend to use and register OAuth callbacks against the deployed origin. Set `GITHUB_PUBLIC_READ_TOKEN` in the web service environment to raise the limit for live public history.
+4. Open `/api/health` and check that `neo4j` is `connected`. The endpoint can report the service ready while the database is disconnected. Then run the three public demo questions, a private sign-in and a revoked-access check. A healthy graph alone does not verify login, mail or AI delivery.
 
 This configuration targets a single application instance. SQLite needs durable storage and backups. The process-local query budget allows six concurrent queries and 90 starts per minute. A multi-instance rollout needs a shared account store and coordinated limits. [Query budget](lib/query-budget.ts)
 
@@ -175,8 +189,8 @@ This configuration targets a single application instance. SQLite needs durable s
 
 | Symptom | First check |
 | --- | --- |
-| Request origin could not be verified | Compare the browser's scheme, hostname and port with `APP_ORIGIN`. Restart after changing the environment. |
+| Request origin could not be verified | Use the scheme and port configured in `APP_ORIGIN`. For a local origin, the app accepts `localhost`, `127.0.0.1`, and `[::1]` on that port. Hosted origins must match exactly. Restart after changing the environment. |
 | Public demo loads but queries fail | Check `/api/health`, the Neo4j database name, credentials and write permission for temporary projections. |
 | GitHub denies a private repository | Verify the engineer's repository membership, selected token repository, read permissions, expiry and organization approval. |
-| Evidence appears without a Sarvam explanation | Check consent, the server-side key and provider availability. Confirm that the query returned evidence. |
+| Evidence appears without an AI explanation | Check consent, server-side keys and provider availability. Confirm that the query returned evidence. |
 | A known decision is missing | Try its PR or issue number, check the cutoff and inspect the sampled record count. Large repositories have bounded coverage. |
