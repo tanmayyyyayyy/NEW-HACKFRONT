@@ -15,3 +15,18 @@
 @media(max-width:440px){.identity{font-size:18px;gap:6px}.mark{width:26px;height:26px;font-size:19px}.bar-inner{gap:7px;padding-inline:12px}.bar-inner nav a{font-size:.8rem}.nav-account{padding:6px 9px}.shelf header{gap:12px}.map-area{padding:20px 12px}.map-route button{padding:10px}.access-layout{padding-block:30px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 .thread-reply{display:grid;gap:10px;padding:18px;background:#edf2e6;border:1px solid var(--line);border-radius:8px;margin:18px 0}.thread-reply>button{justify-self:start;background:var(--green);color:white}.history-window label{margin-top:8px}.history-window summary{cursor:pointer}
+.trail-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:16px 0}
+.trail-actions button{font-size:.85rem;padding:7px 12px}
+.copy-notice{font-size:.8rem;font-weight:650;color:var(--green);background:#e4eed6;padding:4px 8px;border-radius:4px;border:1px solid #c2dbab}
+.sf-record-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sf-kind-badge{display:inline-block;font:bold 11px/1.4 ui-monospace,monospace;text-transform:uppercase;letter-spacing:.04em;padding:2px 7px;border-radius:4px;border:1px solid #b5c4b4;background:#f0f4ec;color:#274334}
+.sf-kind-merged-pr{background:#dbeef0;border-color:#84bdc1;color:#104347}
+.sf-kind-issue{background:#fdf2dc;border-color:#e4c784;color:#614407}
+.sf-kind-discussion{background:#ebe8fc;border-color:#b9b1e7;color:#352771}
+.sf-kind-commit{background:#edeef0;border-color:#c8cbd1;color:#2f343e}
+.cypher-details{margin-top:16px}
+.cypher-box{position:relative}
+.copy-cypher-btn{position:absolute;top:8px;right:8px;font-size:11px;padding:4px 8px;background:#fff;border:1px solid var(--line);border-radius:3px;cursor:pointer}
+.copy-cypher-btn:hover{background:#ecf0e8}
+.override-card{background:#f2f7ed;border:1px solid #bbd1b3;border-radius:8px;padding:14px;margin-bottom:12px}
+.override-basis{margin:8px 0 0;font-size:.88rem;color:#2d4b38}

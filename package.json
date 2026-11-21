@@ -9,7 +9,7 @@
     "collect": "tsx --env-file-if-exists=.env.local scripts/collect.ts",
     "extract": "tsx --env-file-if-exists=.env.local scripts/extract.ts",
     "load": "tsx --env-file-if-exists=.env.local scripts/load.ts",
-    "check:chat": "tsx scripts/check-chat.ts",
+    "check:chat": "tsx --env-file-if-exists=.env.local scripts/check-chat.ts",
     "check:ui": "node scripts/check-ui.mjs"
   },
   "dependencies": {

@@ -1,6 +1,6 @@
 "use client";
 
-import { EvidenceTrail, downloadTrail } from "./EvidenceTrail";
+import { EvidenceTrail, downloadTrail, formatMarkdownTrail } from "./EvidenceTrail";
 import { createAuthClient } from "better-auth/react";
 import { takePrivateAccess } from "./private-transfer";
 import { useEffect, useState } from "react";
@@ -39,6 +39,7 @@ function Desk({ initialMode, signedIn, isPending, starter, userId }: { userId?: 
   const [turns, setTurns] = useState<{ question: string; answer: Result }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [copyStatus, setCopyStatus] = useState("");
 
   const [followUp, setFollowUp] = useState("");
   const [throughDate, setThroughDate] = useState("");
@@ -125,17 +126,41 @@ function Desk({ initialMode, signedIn, isPending, starter, userId }: { userId?: 
               <button type="button" disabled={busy} onClick={() => setFollowUp("Was the earlier decision replaced?")}>Check for overrides</button></div>
             <button disabled={busy || followUp.trim().length < 3}>{busy ? "Checking sources…" : "Send follow-up"}</button>
           </form>}
-          {answer.evidence.length > 0 && <button type="button" onClick={() => downloadTrail(prompt, answer.evidence)}>Download cited trail</button>}
+          {answer.evidence.length > 0 && <div className="trail-actions">
+            <button type="button" onClick={() => downloadTrail(prompt, answer.evidence)}>Download cited trail</button>
+            <button type="button" onClick={() => {
+              if (typeof navigator !== "undefined" && navigator.clipboard) {
+                void navigator.clipboard.writeText(formatMarkdownTrail(prompt, answer.evidence));
+                setCopyStatus("Handover note copied!");
+                setTimeout(() => setCopyStatus(""), 2500);
+              }
+            }}>Copy handover note</button>
+            {copyStatus && <span className="copy-notice" role="status">{copyStatus}</span>}
+          </div>}
           {answer.evidence.map(({ record, links }) => <div className="sf-record" key={record.id}>
-            <a href={record.url} target="_blank" rel="noreferrer">{record.title}</a>
-            <small>{record.kind} · {record.author || "Unknown author"} · {record.date.slice(0, 10)}</small>
+            <div className="sf-record-head">
+              <span className={"sf-kind-badge sf-kind-" + record.kind.toLowerCase().replace(/[^a-z0-9]/g, "-")}>{record.kind}</span>
+              <a href={record.url} target="_blank" rel="noreferrer">{record.title}</a>
+            </div>
+            <small>{record.kind} · {record.author ? "@" + record.author : "Unknown author"} · {record.date.slice(0, 10)}</small>
             {Boolean(record.files?.length) && <details><summary>Changed files ({record.files!.length} shown)</summary><ul>{record.files!.map(path => <li key={path}><code>{path}</code></li>)}</ul><a href={record.url + "/files"} target="_blank" rel="noreferrer">Inspect the GitHub diff ↗</a></details>}
             {record.text && <p>{record.text.slice(0, 550)}{record.text.length > 550 ? "…" : ""}</p>}
             {links.length > 0 && <ul>{links.map(({ kind, basis, record: linked }, index) =>
               <li key={index}>{kind === "SUPERSEDES" ? "Override" : kind === "DISCUSSION" ? "Discussion" : "Reference"} ·{" "}
                 <a href={linked.url} target="_blank" rel="noreferrer">{linked.title}</a><small>{basis}</small></li>)}</ul>}
           </div>)}
-          <details><summary>View executed Cypher</summary><pre>{answer.query}</pre></details>
+          <details className="cypher-details"><summary>View executed Cypher</summary>
+            <div className="cypher-box">
+              <button type="button" className="copy-cypher-btn" onClick={() => {
+                if (typeof navigator !== "undefined" && navigator.clipboard) {
+                  void navigator.clipboard.writeText(answer.query);
+                  setCopyStatus("Cypher query copied!");
+                  setTimeout(() => setCopyStatus(""), 2500);
+                }
+              }}>Copy query</button>
+              <pre>{answer.query}</pre>
+            </div>
+          </details>
         </article>)}
         {turns.length > 0 && <button type="button" disabled={busy} onClick={() => { setTurns([]); setSelected(0); setFollowUp(""); setQuestion(""); setError(""); }}>Clear conversation</button>}
       </section>
