@@ -1,23 +1,21 @@
-
 services:
   - type: web
-    name: skillforge-integrated
+    name: skillforge-repository-desk
     runtime: docker
-    branch: main
-    region: singapore
-    plan: free
+    plan: starter
     healthCheckPath: /api/health
-    dockerCommand: /usr/local/bin/skillforge-start
+    disk:
+      name: skillforge-accounts
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: skillforge-integrated-db
-          property: connectionString
-      - key: SCAN_WORKER_ENABLED
-        value: "true"
-
-databases:
-  - name: skillforge-integrated-db
-    region: singapore
-    plan: free
-    ipAllowList: []
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+      - key: APP_ORIGIN
+        sync: false
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USERNAME
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
