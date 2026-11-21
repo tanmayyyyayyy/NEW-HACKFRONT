@@ -1,4 +1,5 @@
 import { githubTokenSignIn } from "./github-token-signin";
+import { trustedAppOrigins } from "./app-origin";
 import { betterAuth } from "better-auth";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
@@ -33,6 +34,7 @@ async function initialize() {
   const methods = loginMethods();
   const options = {
     appName: "SkillForge", baseURL, secret, database,
+    trustedOrigins: trustedAppOrigins(baseURL),
     plugins: [githubTokenSignIn],
     account: { encryptOAuthTokens: true },
     rateLimit: { enabled: true, storage: "database" as const },

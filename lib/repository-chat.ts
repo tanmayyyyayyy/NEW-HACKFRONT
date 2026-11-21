@@ -18,7 +18,7 @@ export function repositoryName(input: string) {
   return repo;
 }
 
-async function github<T>(path: string, token?: string): Promise<T> {
+export async function requestGithub(path: string, token?: string) {
   const response = await fetch("https://api.github.com" + path, {
     headers: { Accept: "application/vnd.github+json", ...(token && { Authorization: "Bearer " + token }) },
     cache: "no-store", redirect: "error", signal: AbortSignal.timeout(10_000),
@@ -32,7 +32,59 @@ async function github<T>(path: string, token?: string): Promise<T> {
     }
     throw new RepositoryError("GitHub history is temporarily unavailable.", 502);
   }
-  return response.json() as Promise<T>;
+  return response.text();
+}
+
+type PublicCacheEntry = { expiresAt: number; length: number; result: Promise<unknown> };
+const publicCache = new Map<string, PublicCacheEntry>();
+const PUBLIC_CACHE_TTL = 120_000;
+const PUBLIC_CACHE_LIMIT = 128;
+const PUBLIC_CACHE_LENGTH_LIMIT = 4 * 1024 * 1024;
+let publicCacheLength = 0;
+
+function evictPublicResponse(path: string) {
+  publicCacheLength -= publicCache.get(path)?.length ?? 0;
+  publicCache.delete(path);
+}
+
+function trimPublicCache() {
+  while (publicCache.size > PUBLIC_CACHE_LIMIT || publicCacheLength > PUBLIC_CACHE_LENGTH_LIMIT) {
+    const oldest = publicCache.keys().next();
+    if (oldest.done) break;
+    evictPublicResponse(oldest.value);
+  }
+}
+
+async function publicGithub<T>(path: string, token?: string): Promise<T> {
+  const cached = publicCache.get(path);
+  if (cached && cached.expiresAt > Date.now()) return cached.result as Promise<T>;
+  evictPublicResponse(path);
+
+  const result = requestGithub(path, token).then(body => {
+    const value: unknown = JSON.parse(body);
+    if (publicCache.get(path) === entry) {
+      if (body.length > PUBLIC_CACHE_LENGTH_LIMIT) {
+        evictPublicResponse(path);
+      } else {
+        entry.length = body.length;
+        entry.expiresAt = Date.now() + PUBLIC_CACHE_TTL;
+        publicCacheLength += body.length;
+        trimPublicCache();
+      }
+    }
+    return value;
+  }).catch(error => {
+    if (publicCache.get(path) === entry) evictPublicResponse(path);
+    throw error;
+  });
+  const entry: PublicCacheEntry = { expiresAt: Infinity, length: 0, result };
+  publicCache.set(path, entry);
+  trimPublicCache();
+  return result as Promise<T>;
+}
+
+async function uncachedGithub<T>(path: string, token?: string): Promise<T> {
+  return JSON.parse(await requestGithub(path, token)) as T;
 }
 
 type Thread = {
@@ -43,12 +95,18 @@ type Thread = {
 type Comment = { id: number; body: string; user: { login: string } | null; created_at: string };
 type Commit = { sha: string; author: { login: string } | null; commit: { message: string; author: { date: string } } };
 
-async function history(repo: string, mode: "public" | "private", question: string, token?: string) {
+async function history(repo: string, mode: "public" | "private", question: string, token?: string, throughDate?: string) {
   const root = "https://github.com/" + repo;
   const path = "/repos/" + repo;
   const records = new Map<string, Evidence>();
   function add(kind: string, id: string, title: string, text: string, author: string, date: string, url: string) {
     records.set(id, { id, kind, title: title.slice(0, 300), text: text.slice(0, 2800), author, date, url });
+  }
+  const inWindow = (date: string) => !throughDate || Boolean(date && date.slice(0, 10) <= throughDate);
+  function addPull(number: number, title: string, text: string, author: string, createdAt: string, mergedAt?: string | null) {
+    const merged = mergedAt && inWindow(mergedAt) ? mergedAt : undefined;
+    add(merged ? "Merged PR" : "PR", "#" + number, title, text, author,
+      merged ?? createdAt, root + "/pull/" + number);
   }
   const links: Link[] = [];
   const link = (from: string, to: string, kind: string, basis: string) => links.push({ from, to, kind, basis });
@@ -56,8 +114,7 @@ async function history(repo: string, mode: "public" | "private", question: strin
   if (mode === "public" && repo === "appfuton/futon") {
     const fixture = await readGithubData();
     for (const pull of fixture.pulls) {
-      add(pull.mergedAt ? "Merged PR" : "PR", "#" + pull.number, pull.title, pull.body, pull.author,
-        pull.mergedAt ?? pull.createdAt, root + "/pull/" + pull.number);
+      addPull(pull.number, pull.title, pull.body, pull.author, pull.createdAt, pull.mergedAt);
     }
     for (const pr of fixture.pulls) {
       const record = records.get("#" + pr.number);
@@ -82,7 +139,8 @@ async function history(repo: string, mode: "public" | "private", question: strin
         commit.author, commit.date, root + "/commit/" + commit.sha);
     }
     const settings = new Map<string, Pull>();
-    for (const pr of fixture.pulls.filter(pr => pr.mergedAt).sort((a, b) => a.mergedAt!.localeCompare(b.mergedAt!))) {
+    const applied = fixture.pulls.filter(pr => pr.mergedAt && inWindow(pr.mergedAt));
+    for (const pr of applied.sort((a, b) => a.mergedAt!.localeCompare(b.mergedAt!))) {
       for (const file of pr.files) {
         for (const key of file.settings.removed) {
           const prior = settings.get(file.path + ":" + key);
@@ -95,20 +153,28 @@ async function history(repo: string, mode: "public" | "private", question: strin
     }
   } else {
     if (mode === "private" && !token) throw new RepositoryError("Provide your own read-only GitHub token for this repo.", 401);
-    // Public mode uses no credential so a private repository cannot enter through that path.
-    const metadata = await github<{ private: boolean; full_name: string }>(path, token);
+    const publicToken = mode === "public" ? process.env.GITHUB_PUBLIC_READ_TOKEN : undefined;
+    const github = <T>(endpoint: string) => mode === "public"
+      ? publicGithub<T>(endpoint, publicToken)
+      : uncachedGithub<T>(endpoint, token);
+    type Metadata = { private: boolean; full_name: string };
+    // Recheck visibility before using cached history with an authenticated public client.
+    const metadata = publicToken ? await uncachedGithub<Metadata>(path, publicToken) : await github<Metadata>(path);
     if (metadata.full_name.toLowerCase() !== repo || metadata.private !== (mode === "private")) {
       throw new RepositoryError("The repository is unavailable in the selected path.", 403);
     }
     const [pulls, issues, commits] = await Promise.all([
-      github<Thread[]>(path + "/pulls?state=closed&sort=updated&per_page=20", token),
-      github<Thread[]>(path + "/issues?state=all&sort=updated&per_page=20", token),
-      github<Commit[]>(path + "/commits?per_page=12", token),
+      github<Thread[]>(path + "/pulls?state=closed&sort=updated&per_page=20"),
+      github<Thread[]>(path + "/issues?state=all&sort=updated&per_page=20"),
+      github<Commit[]>(path + "/commits?per_page=12"),
     ]);
     const saveThread = (row: Thread, isPull: boolean) => {
-      const merged = row.merged_at ?? row.pull_request?.merged_at;
-      add(isPull ? merged ? "Merged PR" : "PR" : "Issue", "#" + row.number, row.title, row.body ?? "",
-        row.user?.login ?? "", merged ?? row.created_at, root + (isPull ? "/pull/" : "/issues/") + row.number);
+      const author = row.user?.login ?? "";
+      if (isPull) {
+        addPull(row.number, row.title, row.body ?? "", author, row.created_at, row.merged_at ?? row.pull_request?.merged_at);
+      } else {
+        add("Issue", "#" + row.number, row.title, row.body ?? "", author, row.created_at, root + "/issues/" + row.number);
+      }
     };
     pulls.forEach(row => saveThread(row, true));
     issues.filter(row => !row.pull_request).forEach(row => saveThread(row, false));
@@ -119,7 +185,7 @@ async function history(repo: string, mode: "public" | "private", question: strin
     await Promise.all([...new Set(findMentions(question))].slice(0, 3).map(async number => {
       if (!records.has("#" + number)) {
         try {
-          const row = await github<Thread>(path + "/issues/" + number, token);
+          const row = await github<Thread>(path + "/issues/" + number);
           saveThread(row, Boolean(row.pull_request));
         } catch (err) {
           if (!(err instanceof RepositoryError) || err.status !== 403) throw err;
@@ -128,10 +194,10 @@ async function history(repo: string, mode: "public" | "private", question: strin
       const parent = records.get("#" + number);
       if (!parent) return;
       if (parent.kind.endsWith("PR")) {
-        const files = await github<{filename: string}[]>(path + "/pulls/" + number + "/files?per_page=12", token);
+        const files = await github<{filename: string}[]>(path + "/pulls/" + number + "/files?per_page=12");
         parent.files = files.map(file => file.filename);
       }
-      const comments = await github<Comment[]>(path + "/issues/" + number + "/comments?per_page=5", token);
+      const comments = await github<Comment[]>(path + "/issues/" + number + "/comments?per_page=5");
       for (const comment of comments) {
         const id = "discussion:" + comment.id;
         add("Discussion", id, "Discussion on #" + number, comment.body, comment.user?.login ?? "",
@@ -139,6 +205,9 @@ async function history(repo: string, mode: "public" | "private", question: strin
         link(parent.id, id, "DISCUSSION", "Comment on this thread");
       }
     }));
+  }
+  for (const row of records.values()) {
+    if (!inWindow(row.date)) records.delete(row.id);
   }
   for (const row of records.values()) {
     for (const number of findMentions(row.text)) {
@@ -172,8 +241,7 @@ RETURN properties(r) AS record, collect(DISTINCT {kind:type(rel), basis: rel.bas
 export async function repositoryEvidence(repo: string, mode: "public" | "private", question: string, token?: string, contextIds: string[] = [], throughDate?: string) {
   const explicit = findMentions(question).map(number => "#" + number);
   const refs = [...new Set(explicit.length ? explicit : contextIds)];
-  const data = await history(repo, mode, [question, ...refs].join(" "), token);
-  const records = throughDate ? data.records.filter(row => row.date && row.date.slice(0, 10) <= throughDate) : data.records;
+  const { records, links } = await history(repo, mode, [question, ...refs].join(" "), token, throughDate);
   const stop = new Set("why what when how this that the and for does did was are were use from with into can you explain about kyun kyon hai hua iska kya kaise kaun batao mujhe".split(" "));
   const terms = [...new Set((question.toLowerCase().match(/[a-z][a-z0-9_-]{2,}/g) ?? []).filter(word => !stop.has(word)))].slice(0, 15);
   const session = driver.session({ database: process.env.NEO4J_DATABASE || "neo4j", defaultAccessMode: neo4j.session.WRITE });
@@ -190,7 +258,7 @@ export async function repositoryEvidence(repo: string, mode: "public" | "private
         FOREACH (_ IN CASE WHEN link.kind = 'SUPERSEDES' THEN [1] ELSE [] END | CREATE (a)-[:SUPERSEDES {basis:link.basis}]->(b))
         FOREACH (_ IN CASE WHEN link.kind = 'REFERENCES' THEN [1] ELSE [] END | CREATE (a)-[:REFERENCES {basis:link.basis}]->(b))
         FOREACH (_ IN CASE WHEN link.kind = 'DISCUSSION' THEN [1] ELSE [] END | CREATE (a)-[:DISCUSSION {basis:link.basis}]->(b))`,
-      { scope, links: data.links });
+      { scope, links });
       const matches = await tx.run(MATCH_EVIDENCE, { scope, terms, refs });
       return {
         evidence: matches.records.map(row => ({

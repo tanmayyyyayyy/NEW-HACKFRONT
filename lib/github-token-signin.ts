@@ -2,6 +2,7 @@ import { APIError, createAuthEndpoint } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import { z } from "zod";
 import { repositoryName } from "./repository-chat";
+import { matchesAppOrigin } from "./app-origin";
 
 export const githubTokenSignIn = {
   id: "private-github-access",
@@ -9,7 +10,7 @@ export const githubTokenSignIn = {
     signInWithRepository: createAuthEndpoint("/private-repository", {
       method: "POST", body: z.object({ repository: z.string().max(170) }),
     }, async ctx => {
-      if (ctx.headers?.get("origin") !== process.env.APP_ORIGIN) throw new APIError("FORBIDDEN");
+      if (!matchesAppOrigin(ctx.headers?.get("origin"), process.env.APP_ORIGIN)) throw new APIError("FORBIDDEN");
       const authorization = ctx.headers?.get("authorization") || "";
       if (!/^Bearer github_pat_[a-zA-Z0-9_]{20,240}$/.test(authorization)) {
         throw new APIError("UNAUTHORIZED", { message: "Enter a fine-grained GitHub personal access token." });
