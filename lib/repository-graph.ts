@@ -7,12 +7,18 @@ import { graphModel, importSpecifiers, sourceFilePattern, sourceFileLimit, treeE
 
 type Entry = { path: string; sha: string; type: string; size?: number };
 type Commit = { sha: string; commit: { message: string }; parents?: { sha: string }[] };
-type Pull = { number: number; title: string; body: string | null; merge_commit_sha: string | null; merged_at: string | null };
+type Pull = { number: number; title: string; body: string | null; merge_commit_sha: string | null; merged_at: string | null; created_at?: string | null; user?: { login?: string } | null };
 const shaPattern = /^[a-f0-9]{40}$/i;
 
 const data = async <T>(path: string, token?: string) => JSON.parse(await requestGithub(path, token)) as T;
 const pullId = (number: number) => "pull:" + number;
 const commitId = (sha: string) => "commit:" + sha;
+function supersededPullReferences(text: string) {
+  const references = new Set(Array.from(text.matchAll(/\b(?:reverts?|supersedes?|replaces?)\s+(?:PR\s+)?#(\d+)/gi), match => Number(match[1])));
+  const changesDecision = /\b(?:chang(?:e|es|ed|ing)|switch(?:es|ed|ing)|modif(?:y|ies|ied|ying))\s+(?:(?:the|its|their)\s+)?(?:default|behavior|behaviour|approach|strategy|architecture|policy)\b/i.test(text);
+  if (changesDecision) for (const number of findMentions(text)) references.add(number);
+  return references;
+}
 export async function readRepositoryGraph(repository: string, mode: "public" | "private", owner: string, token?: string, refresh = false) {
   if (mode === "private" && (!owner || !token)) throw new RepositoryError("Sign in and provide a GitHub read token.", 401);
   const credential = mode === "private" ? token : process.env.GITHUB_PUBLIC_READ_TOKEN;
@@ -31,14 +37,29 @@ export async function readRepositoryGraph(repository: string, mode: "public" | "
       "MATCH (g:SkillForgeGraph {key: $key, revision: $revision}) RETURN g.snapshot AS snapshot ORDER BY g.indexedAt DESC LIMIT 1",
       { key, revision }, { database, routing: "READ" },
     );
-    if (cached.records.length) return JSON.parse(cached.records[0].get("snapshot")) as RepositoryGraph;
+    if (cached.records.length) {
+      const snapshot = JSON.parse(cached.records[0].get("snapshot")) as RepositoryGraph;
+      if (snapshot.nodes.filter(node => node.kind === "pull").every(node => node.evidence !== undefined)) return snapshot;
+    }
   }
   const web = "https://github.com/" + repository;
-  const [tree, commits, pulls] = await Promise.all([
+  const [tree, commits, recentPulls] = await Promise.all([
     data<{ tree: Entry[]; truncated: boolean }>(prefix + "/git/trees/" + revision + "?recursive=1", credential),
     data<Commit[]>(prefix + "/commits?sha=" + revision + "&per_page=24", credential),
     data<Pull[]>(prefix + "/pulls?state=all&sort=updated&per_page=18", credential),
   ]);
+  const pulls = [...recentPulls];
+  const knownPulls = new Set(pulls.map(pull => pull.number));
+  const olderReferences = new Set<number>();
+  for (const pull of recentPulls) {
+    const text = pull.title + "\n" + (pull.body || "");
+    for (const number of supersededPullReferences(text)) if (number > 0 && !knownPulls.has(number)) olderReferences.add(number);
+  }
+  const referencedPulls = await Promise.all([...olderReferences].slice(0, 8).map(async number => {
+    try { return await data<Pull>(prefix + "/pulls/" + number, credential); }
+    catch { return undefined; }
+  }));
+  pulls.push(...referencedPulls.filter((pull): pull is Pull => !!pull && olderReferences.has(pull.number)));
   const graph: RepositoryGraph = {
     repository, revision, indexedAt: new Date().toISOString(), nodes: [], edges: [],
     coverage: { files: 0, importFiles: 0, treePartial: tree.truncated || tree.tree.length > treeEntryLimit, historyPartial: commits.length === 24 || pulls.length === 18 },
@@ -70,7 +91,10 @@ export async function readRepositoryGraph(repository: string, mode: "public" | "
   }
   commits.forEach(commitNode);
   for (const pull of pulls) {
-    add({ id: pullId(pull.number), label: "#" + pull.number, detail: pull.title.slice(0, 200), kind: "pull", url: web + "/pull/" + pull.number });
+    const evidence = (pull.title + (pull.body ? "\n\n" + pull.body : "")).trim().slice(0, 2400);
+    add({ id: pullId(pull.number), label: "#" + pull.number, detail: pull.title.slice(0, 200), kind: "pull",
+      url: web + "/pull/" + pull.number, createdAt: pull.created_at || undefined, mergedAt: pull.merged_at || undefined,
+      author: pull.user?.login, evidence });
   }
   const pullCommits = await Promise.all(pulls.slice(0, 4).map(async pull => ({
     pull, commits: await data<Commit[]>(prefix + "/pulls/" + pull.number + "/commits?per_page=14", credential),
@@ -89,9 +113,11 @@ export async function readRepositoryGraph(repository: string, mode: "public" | "
   for (const pull of pulls) {
     if (pull.merged_at && pull.merge_commit_sha) link(pullId(pull.number), commitId(pull.merge_commit_sha), "INCLUDES");
     const text = pull.title + "\n" + (pull.body || "");
-    const overrides = new Set(Array.from(text.matchAll(/\b(?:reverts?|supersedes?|replaces?)\s+(?:PR\s+)?#(\d+)/gi), match => Number(match[1])));
+    const overrides = supersededPullReferences(text);
     for (const reference of findMentions(text)) {
-      link(pullId(pull.number), pullId(reference), pull.merged_at && overrides.has(reference) ? "SUPERSEDES" : "REFERENCES");
+      const earlier = pulls.find(candidate => candidate.number === reference);
+      const laterOverride = !!pull.merged_at && !!earlier?.merged_at && Date.parse(pull.merged_at) > Date.parse(earlier.merged_at) && overrides.has(reference);
+      link(pullId(pull.number), pullId(reference), laterOverride ? "SUPERSEDES" : "REFERENCES");
     }
   }
   return persistRepositoryGraph(key, model.finish());

@@ -4,6 +4,10 @@ export type GraphNode = {
   detail: string;
   kind: "folder" | "file" | "package" | "pull" | "commit";
   url?: string;
+  createdAt?: string;
+  mergedAt?: string;
+  author?: string;
+  evidence?: string;
 };
 
 export type GraphEdge = {
