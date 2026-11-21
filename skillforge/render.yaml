@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: skillforge-repository-desk
+    rootDir: skillforge
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: skillforge-accounts
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+      - key: APP_ORIGIN
+        sync: false
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USERNAME
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false

@@ -28,3 +28,7 @@ The findings below come from source inspection. UI behavior, provider availabili
 - SkillForge lockfile install, lint, client/server type checks, build, test suite and fixture-backed browser paths. Record the actual test count and any known failures. Compare readiness scoring and report output before porting them.
 - Hackfront build and lint, locked Python dependency install, Ruff, Bandit, backend compile checks and fixture-backed browser paths. Verify the 10-request REST budget and import source limits against fixture telemetry. Exercise auth, retention, saved indexes, provider consent and expiry against isolated staging services.
 - Compare both repository question flows using one public fixture with an explicit decision, follow-up PR, and an unanswered question. Capture evidence relationships, citations and degraded states. Include an isolated baseline of the PR review, ADR export and evidence timeline. Preserve findings when they affect acceptance criteria.
+
+## SkillForge repository desk
+
+Imported the user-supplied WhyGraph-based SkillForge application at the owner’s explicit request to publish to this repository. The supplied folder has no upstream Git revision. The imported skillforge/ file manifest (SHA-256 over sorted UTF-8 path, NUL and binary SHA-256 per file) is `566373bf51b8df9db61b53ab58d53e70da6efce42094c8c2d227ea745e854e15`. The included Futon snapshot is public repository history used by the demo. Local account databases, credentials and build caches are excluded.

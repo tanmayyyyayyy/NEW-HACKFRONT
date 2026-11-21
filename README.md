@@ -1,3 +1,9 @@
+# SkillForge
+
+The current repository-history chatbot, public explorer, private team handover, and hackathon materials are in [skillforge/](skillforge/README.md). Run its commands from that directory. For a new Render service use [the SkillForge Blueprint](skillforge/render.yaml) with service root `skillforge`.
+
+## Earlier integrated prototype
+
 # SkillForge Integrated
 
 SkillForge Integrated helps students, developers, and working professionals rank their GitHub repositories by code quality, explore how files and functions connect in an interactive graph, and practice data structures and algorithms through real-world coding tests. Repository findings and test results can support a portfolio and career plan.
