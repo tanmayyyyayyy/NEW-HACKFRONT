@@ -44,7 +44,12 @@ async function explainWithSarvam(language: string, question: string, evidence: A
 export async function POST(request: Request) {
   const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
   const origin = request.headers.get("origin");
-  if (origin !== (process.env.APP_ORIGIN || new URL(request.url).origin)) return reply({ error: "Request origin could not be verified." }, 403);
+  const allowed = [
+    process.env.APP_ORIGIN,
+    process.env.RENDER_EXTERNAL_URL,
+    new URL(request.url).origin,
+  ].filter(Boolean);
+  if (origin && !allowed.includes(origin)) return reply({ error: "Request origin could not be verified." }, 403);
   const reader = request.body?.getReader();
   const decoder = new TextDecoder();
   let size = 0;

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "next start --hostname 0.0.0.0 --port ${PORT:-3000}",
     "collect": "tsx --env-file-if-exists=.env.local scripts/collect.ts",
     "extract": "tsx --env-file-if-exists=.env.local scripts/extract.ts",
     "load": "tsx --env-file-if-exists=.env.local scripts/load.ts",

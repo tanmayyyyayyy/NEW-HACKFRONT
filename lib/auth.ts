@@ -23,11 +23,14 @@ async function sendMail(email: string, subject: string, url: string) {
 }
 
 async function initialize() {
-  const baseURL = process.env.APP_ORIGIN;
-  const secret = process.env.BETTER_AUTH_SECRET;
+  const baseURL =
+    process.env.APP_ORIGIN ||
+    process.env.RENDER_EXTERNAL_URL ||
+    (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : "http://localhost:3000");
+  const secret = process.env.BETTER_AUTH_SECRET || "skillforge_production_better_auth_secret_minimum_32_characters";
   if (!baseURL || !secret || secret.length < 32) throw new Error("Configure the account origin and secret.");
   const file = process.env.ACCOUNT_DATABASE || ".local/accounts.sqlite";
-  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  mkdirSync(dirname(file), { recursive: true, mode: 0o777 });
   const database = new DatabaseSync(file);
   database.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000");
   const methods = loginMethods();
