@@ -4,11 +4,12 @@ import { useMemo, useState, type FormEvent } from "react";
 import type { GraphEdge, GraphNode, RepositoryGraph } from "../../lib/graph-types";
 import { importSpecifiers, sourceFileLimit, sourceFilePattern, treeEntryLimit } from "../../lib/graph-model";
 
-type View = "files" | "imports" | "history";
+type View = "files" | "imports" | "history" | "conflicts";
 const views: { id: View; label: string; empty: string }[] = [
   { id: "files", label: "File structure", empty: "No files or folders available." },
   { id: "imports", label: "Module imports", empty: "No static JavaScript or TypeScript imports were found in the scanned files." },
   { id: "history", label: "Decision history", empty: "No pull requests or commits were found in the indexed history." },
+  { id: "conflicts", label: "Decision conflicts", empty: "No linked decision updates were found in the indexed pull request history." },
 ];
 const labels: Record<GraphEdge["kind"], string> = {
   CONTAINS: "Contains", IMPORTS: "Imports", PARENT: "Parent commit", INCLUDES: "Includes commit",
@@ -20,7 +21,14 @@ const ignoredFolders = new Set([".git", "node_modules", ".next", "dist", "build"
 function belongs(edge: GraphEdge, view: View) {
   if (view === "files") return edge.kind === "CONTAINS";
   if (view === "imports") return edge.kind === "IMPORTS";
+  if (view === "conflicts") return edge.kind === "SUPERSEDES";
   return edge.kind !== "CONTAINS" && edge.kind !== "IMPORTS";
+}
+
+function dateLabel(value?: string) {
+  if (!value) return "Date not available";
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? "Date not available" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(date);
 }
 
 export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: string; initialPrivate: boolean }) {
@@ -47,7 +55,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
     const nodes = graph?.nodes.filter(node => {
       if (view === "files") return node.kind === "file" || node.kind === "folder";
       if (view === "imports") return ids.has(node.id);
-      return overridesOnly ? ids.has(node.id) : node.kind === "pull" || node.kind === "commit";
+      return overridesOnly || view === "conflicts" ? ids.has(node.id) : node.kind === "pull" || node.kind === "commit";
     }) ?? [];
     return { nodes, edges, byId: new Map(nodes.map(node => [node.id, node])) };
   }, [graph, view, overridesOnly]);
@@ -60,6 +68,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
     return Array.from(counts, ([id, count]) => ({ id, count }))
       .sort((a, b) => b.count - a.count || a.id.localeCompare(b.id)).slice(0, 3);
   }, [view, edges]);
+  const conflictEdges = graph?.edges.filter(edge => edge.kind === "SUPERSEDES") ?? [];
   const selected = byId.get(focus) ?? (view === "files" ? nodes[0] : byId.get(edges[0]?.from) ?? nodes[0]);
   const incoming = selected ? edges.filter(edge => edge.to === selected.id) : [];
   const outgoing = selected ? edges.filter(edge => edge.from === selected.id) : [];
@@ -70,7 +79,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const middle = height / 2;
   const rowY = (index: number, count: number) => middle + (index - (count - 1) / 2) * 72;
   const selectedView = views.find(item => item.id === view)!;
-  const headings = view === "files" ? ["Parent folder", "Contents"] : view === "imports" ? ["Imported by", "Imports"] : ["Incoming links", "Outgoing links"];
+  const headings = view === "files" ? ["Parent folder", "Contents"] : view === "imports" ? ["Imported by", "Imports"] : view === "conflicts" ? ["Newer decision", "Earlier decision"] : ["Incoming links", "Outgoing links"];
 
   function inspect(id: string) {
     setFocus(id);
@@ -217,7 +226,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
       <header className="graph-bar">
         <div><strong>{graph.repository}</strong> <code>{graph.revision.slice(0, 8)}</code></div>
         <nav className="workspace-modes" aria-label="Graph view">
-          {views.map(item => <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => changeView(item.id)}>{item.label}</button>)}
+          {views.map(item => <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => changeView(item.id)}>{item.label}{item.id === "conflicts" && conflictEdges.length > 0 ? ` · ${conflictEdges.length}` : ""}</button>)}
         </nav>
       </header>
       <div className="graph-layout">
@@ -226,6 +235,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
             placeholder="Path, module, commit or PR" /></label>
           {view === "history" && <label className="sf-check"><input type="checkbox" checked={overridesOnly}
             onChange={event => { setOverridesOnly(event.target.checked); inspect(""); }} />Superseded decisions only</label>}
+          {view === "conflicts" && <p className="conflict-hint">Later merged PRs that explicitly replace an earlier PR or describe a changed default, behavior, approach, or architecture while referencing it.</p>}
           {!lookup && imported.length > 0 && <div className="graph-highlights">
             <small>Most imported in this scan</small>
             {imported.map(item => <button key={item.id} type="button" onClick={() => inspect(item.id)}>
@@ -240,6 +250,26 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
           {matches.length > nodeLimit && <button type="button" onClick={() => setNodeLimit(limit => limit + 36)}>Show more nodes</button>}
         </aside>
         <div className="graph-stage">
+          {view === "conflicts" && conflictEdges.length > 0 && <section className="conflict-list" aria-label="Detected decision conflicts">
+            <div className="conflict-list-heading"><span className="conflict-spark" aria-hidden="true">✳</span><div><h3>Decisions that changed</h3><p>Each pair is linked by an explicit reference in the newer pull request.</p></div></div>
+            {conflictEdges.map(edge => {
+              const newer = graph?.nodes.find(node => node.id === edge.from);
+              const older = graph?.nodes.find(node => node.id === edge.to);
+              if (!newer || !older) return null;
+              return <article className="conflict-pair" key={edge.from + edge.to}>
+                <div className="conflict-pair-top"><span>DECISION UPDATE</span><span>NEWER <b aria-hidden="true">→</b> EARLIER</span></div>
+                <div className="conflict-decisions">
+                  {[{ node: newer, label: "Newer decision", direction: "new" }, { node: older, label: "Earlier decision", direction: "old" }].map(({ node, label, direction }) => <div className={`conflict-decision conflict-${direction}`} key={node.id}>
+                    <small>{label}</small><h4>{node.label}: {node.detail}</h4>
+                    <p><span>{node.author ? `@${node.author}` : "Author unavailable"}</span><span>{dateLabel(node.mergedAt || node.createdAt)}</span></p>
+                    {node.evidence && <blockquote>{node.evidence}</blockquote>}
+                    {node.url && <a href={node.url} target="_blank" rel="noreferrer">Open original pull request <span aria-hidden="true">↗</span></a>}
+                  </div>)}
+                </div>
+                <button className="conflict-explore" type="button" onClick={() => inspect(newer.id)}>Explore this relationship <span aria-hidden="true">→</span></button>
+              </article>;
+            })}
+          </section>}
           <div className="graph-tools">
             <h2>{selectedView.label}</h2>
             <div className="graph-zoom" aria-label="Diagram zoom">
