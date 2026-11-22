@@ -8,7 +8,7 @@ A new maintainer opens Futon and finds that the reader waits for chapter updates
 
 ## Repository graph
 
-Open **Graph** and index a GitHub repository URL or a local folder. SkillForge stores each index in Neo4j and shows six ways to explore it in an interactive 3D graph:
+Open **Graph** and index a GitHub repository URL or a local folder. SkillForge stores each index in Neo4j and shows six ways to explore it in a switchable 2D and 3D graph. The focused 2D relationship diagram opens by default; choose **3D** for a spatial view or **Full map** for the complete overview.
 
 - **File structure** shows folders, their parent, and their contents.
 - **Module imports** shows statically detected imports between JavaScript and TypeScript files and external packages. It samples up to 18 source files and recognizes relative imports and conventional `@/` paths. Runtime calls and custom compiler aliases can be missing.
@@ -17,7 +17,7 @@ Open **Graph** and index a GitHub repository URL or a local folder. SkillForge s
 - **Knowledge risk map** groups source files into modules and surfaces sparse rationale documentation, contributor concentration, and missing links between sampled pull requests. GitHub ownership signals come from up to 12 recent PR file lists; local folders can show documentation gaps but do not include historical contributors or decisions. Risk signals are a triage aid based on the sampled index, not a code quality or personnel assessment.
 - **PR reviewer** accepts a GitHub pull request link, compares its changed files with earlier merged PRs on those files, and surfaces possible conflicts with cited decisions and draft review comments. Optional AI review checks decision alignment, known reversals, regression risk, and test rationale. It only states a direct conflict when the cited source supports it; matching a file alone is shown as historical context. No comments are posted to GitHub.
 
-Drag the 3D graph to orbit and use the on-canvas controls or arrow keys to rotate and zoom. The node list remains available for keyboard selection and when WebGL is unavailable.
+The 2D and 3D modes keep the selected node and surrounding features in place. The 2D view shows a focused set of relationships with zoom controls; drag the 3D graph to orbit and use the on-canvas controls or arrow keys to rotate and zoom. The node list remains available for keyboard selection and when WebGL is unavailable.
 
 Choose a node and switch between the **2D** relationship diagram and the orbitable **3D** view. Both keep the current selection. GitHub nodes link to their source. Choose **Open in chat** to carry the repository into the workspace. Private repositories require sign-in and a scoped read token. Local folder indexing also requires sign-in. It sends file paths and detected imports, skips common build folders and environment files, and leaves GitHub history to the GitHub importer. On public deployments, set `APP_ORIGIN` to the public HTTPS origin so robots and sitemap metadata point to the correct host.
 

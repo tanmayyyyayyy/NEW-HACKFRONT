@@ -51,7 +51,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const [focus, setFocus] = useState("");
   const [search, setSearch] = useState("");
   const [zoom, setZoom] = useState(100);
-  const [dimension, setDimension] = useState<"2D" | "3D" | "Full map">("Full map");
+  const [dimension, setDimension] = useState<"2D" | "3D" | "Full map">("2D");
   const [page, setPage] = useState(0);
   const [nodeLimit, setNodeLimit] = useState(36);
   const [overridesOnly, setOverridesOnly] = useState(false);
@@ -362,7 +362,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
                   <p>Top contributor <b>@{area.topContributor}</b> · {Math.round(area.topContributorShare * 100)}% of sampled PRs</p></>
                   : <p>Contributor history unavailable · {area.decisionConnections} linked decisions</p>}
                 <ul>{area.signals.map(signal => <li key={signal}>{signal}</li>)}</ul>
-                <button type="button" onClick={() => inspect("risk:" + area.id)}>Locate in 3D map <span aria-hidden="true">↗</span></button>
+                <button type="button" onClick={() => inspect("risk:" + area.id)}>Locate in graph <span aria-hidden="true">↗</span></button>
               </article>)}
             </div>
             {riskAreas.length === 0 && <p className="graph-notice">The scan found no modules matching the current risk signals.</p>}
