@@ -12,7 +12,7 @@ services:
       - key: ACCOUNT_DATABASE
         value: .local/accounts.sqlite
       - key: APP_ORIGIN
-        sync: false
+        value: https://skillforge-repository-desk.onrender.com
       - key: NEO4J_URI
         sync: false
       - key: NEO4J_USERNAME

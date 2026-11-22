@@ -1,4 +1,11 @@
-# SkillForge
+# SkillForge AI
+
+[![Live Application](https://img.shields.io/badge/Live%20Demo-skillforge--repository--desk.onrender.com-success?style=for-the-badge&logo=render)](https://skillforge-repository-desk.onrender.com)
+[![GitHub Workflow](https://img.shields.io/github/actions/workflow/status/tanmayyyyayyy/SkillForge-AI/checks.yml?branch=main&label=CI%20Checks&style=for-the-badge)](https://github.com/tanmayyyyayyy/SkillForge-AI/actions)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/tanmayyyyayyy/SkillForge-AI)
+
+> 🚀 **Live Production Application**: [https://skillforge-repository-desk.onrender.com](https://skillforge-repository-desk.onrender.com)  
+> 🩺 **Health Endpoint**: [https://skillforge-repository-desk.onrender.com/api/health](https://skillforge-repository-desk.onrender.com/api/health)
 
 **Understand why a codebase changed, even after the engineer who made the change has moved on.**
 
@@ -28,8 +35,8 @@ The optional AI reviewer uses the configured Gemini service when **Use AI** is c
 Use Node.js 24, npm and a running Neo4j instance. Docker is convenient for the local database. Run the following in a POSIX shell on a fresh checkout.
 
 ```sh
-git clone https://github.com/tanmayyyyayyy/NEW-HACKFRONT.git
-cd NEW-HACKFRONT
+git clone https://github.com/tanmayyyyayyy/SkillForge-AI.git
+cd SkillForge-AI
 npm ci
 cp .env.example .env.local
 ```
@@ -120,7 +127,7 @@ Open [Connect a coding agent](http://localhost:3000/connect) and copy the setup 
 For manual setup, start SkillForge with `npm start` and register a **stdio** server named `skillforge`. Use `node` as the command and the following arguments, substituting the absolute paths for your checkout.
 
 ```json
-["--import", "file:///C:/path/to/NEW-HACKFRONT/node_modules/tsx/dist/loader.mjs", "C:/path/to/NEW-HACKFRONT/scripts/mcp.ts"]
+["--import", "file:///C:/path/to/SkillForge-AI/node_modules/tsx/dist/loader.mjs", "C:/path/to/SkillForge-AI/scripts/mcp.ts"]
 ```
 
 The MCP server uses `http://localhost:3000` by default. Set `SKILLFORGE_URL` in the MCP client if you run SkillForge on a different local port. It exposes `ask_repository`, `review_pull_request`, `list_open_pull_requests` and `repository_graph` for public GitHub data. Graph requests may save a local index. GitHub credentials stay in the running web app.
@@ -202,9 +209,11 @@ Live OAuth callbacks, real email delivery, organization token approval and Sarva
 
 ## Deploying on Render
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/tanmayyyyayyy/SkillForge-AI)
+
 The root Blueprint provisions a **free web service**. The Docker image runs Next.js as the `node` user and stores accounts in `.local/accounts.sqlite`. Render can discard that file on redeploy or restart. For durable accounts, use a plan with a persistent disk and set `ACCOUNT_DATABASE` to a path on that disk. [Render Blueprint](render.yaml) · [Dockerfile](Dockerfile)
 
-1. Connect this repository as a Blueprint and select the root `render.yaml`.
+1. Click the **Deploy to Render** button above or connect this repository (`tanmayyyyayyy/SkillForge-AI`) as a Blueprint in Render and select `render.yaml`.
 2. Set the exact HTTPS origin and Neo4j credentials. Render generates the account secret. Keep it stable across deployments.
 3. Add the optional provider keys you intend to use and register OAuth callbacks against the deployed origin. Set `GITHUB_PUBLIC_READ_TOKEN` in the web service environment to raise the limit for live public history.
 4. Open `/api/health` and check that `neo4j` is `connected`. The endpoint can report the service ready while the database is disconnected. Then run the three public demo questions, a private sign-in and a revoked-access check. A healthy graph alone does not verify login, mail or AI delivery.

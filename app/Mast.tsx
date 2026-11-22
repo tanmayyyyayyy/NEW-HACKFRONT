@@ -29,7 +29,7 @@ export function Footer() {
         <a href="/graph">Graph</a>
         <a href="/library">Trace library</a>
         <a href="/connect">Connect a coding agent</a>
-        <a href="https://github.com/tanmayyyyayyy/NEW-HACKFRONT" target="_blank" rel="noreferrer">Source on GitHub</a>
+        <a href="https://github.com/tanmayyyyayyy/SkillForge-AI" target="_blank" rel="noreferrer">Source on GitHub</a>
       </nav>
     </div>
   </footer>;

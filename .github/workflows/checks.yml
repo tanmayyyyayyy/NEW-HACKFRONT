@@ -12,6 +12,9 @@ jobs:
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment:
+      name: Production
+      url: https://skillforge-repository-desk.onrender.com
     env:
       APP_ORIGIN: http://localhost:3000
       NEO4J_URI: bolt://127.0.0.1:7687
@@ -51,3 +54,9 @@ jobs:
             exit 1
           fi
           npm run check:ui
+      - name: Report Live Deployment Link
+        if: always()
+        run: |
+          echo "### 🚀 SkillForge AI Live Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "Production URL: [https://skillforge-repository-desk.onrender.com](https://skillforge-repository-desk.onrender.com)" >> $GITHUB_STEP_SUMMARY
+          echo "Health Check: [https://skillforge-repository-desk.onrender.com/api/health](https://skillforge-repository-desk.onrender.com/api/health)" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,5 @@
+# SkillForge AI Live Link Configuration
+name: skillforge-ai
+url: https://skillforge-repository-desk.onrender.com
+health: https://skillforge-repository-desk.onrender.com/api/health
+repository: https://github.com/tanmayyyyayyy/SkillForge-AI
