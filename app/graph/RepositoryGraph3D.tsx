@@ -7,7 +7,7 @@ const edgeColors: Record<GraphEdge["kind"], number> = {
   CONTAINS: 0x414d63, IMPORTS: 0x5383c8, PARENT: 0x7c7184, INCLUDES: 0x8e718d,
   REFERENCES: 0x6d9aa5, SUPERSEDES: 0xffa273, COVERS: 0x7eb4ad,
 };
-const visibleNodeLimit = 100;
+const visibleNodeLimit = 68;
 
 function palette(kind: GraphNode["kind"], riskScore = 0) {
   if (kind === "risk") return riskScore >= 0.7 ? 0xff846b : riskScore >= 0.35 ? 0xffc171 : 0x7dc4b6;

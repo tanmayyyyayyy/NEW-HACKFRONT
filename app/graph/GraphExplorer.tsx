@@ -5,6 +5,7 @@ import type { GraphEdge, GraphNode, RepositoryGraph } from "../../lib/graph-type
 import type { AIReview, ReviewFinding } from "../../lib/pr-review";
 import { importSpecifiers, sourceFileLimit, sourceFilePattern, treeEntryLimit } from "../../lib/graph-model";
 import { RepositoryGraph3D } from "./RepositoryGraph3D";
+import { RepositoryGraph2D } from "./RepositoryGraph2D";
 
 type View = "files" | "imports" | "history" | "conflicts" | "risk" | "review";
 const views: { id: View; label: string; empty: string }[] = [
@@ -42,6 +43,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const [busy, setBusy] = useState(false);
   const [graph, setGraph] = useState<RepositoryGraph>();
   const [view, setView] = useState<View>("files");
+  const [graphMode, setGraphMode] = useState<"2d" | "3d">("2d");
   const [focus, setFocus] = useState("");
   const [search, setSearch] = useState("");
   const [nodeLimit, setNodeLimit] = useState(36);
@@ -335,7 +337,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
                   <p>Top contributor <b>@{area.topContributor}</b> · {Math.round(area.topContributorShare * 100)}% of sampled PRs</p></>
                   : <p>Contributor history unavailable · {area.decisionConnections} linked decisions</p>}
                 <ul>{area.signals.map(signal => <li key={signal}>{signal}</li>)}</ul>
-                <button type="button" onClick={() => inspect("risk:" + area.id)}>Locate in 3D map <span aria-hidden="true">↗</span></button>
+                <button type="button" onClick={() => inspect("risk:" + area.id)}>Locate in graph <span aria-hidden="true">↗</span></button>
               </article>)}
             </div>
             {riskAreas.length === 0 && <p className="graph-notice">The scan found no modules matching the current risk signals.</p>}
@@ -362,9 +364,14 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
           </section>}
           <div className="graph-tools">
             <h2>{selectedView.label}</h2>
+            <div className="graph-mode-switch" role="group" aria-label="Graph dimension">
+              <button type="button" aria-pressed={graphMode === "2d"} onClick={() => setGraphMode("2d")}>2D</button>
+              <button type="button" aria-pressed={graphMode === "3d"} onClick={() => setGraphMode("3d")}>3D</button>
+            </div>
           </div>
           {selected ? <>
-            <RepositoryGraph3D nodes={nodes} edges={edges} selectedId={selected.id} onSelect={inspect} />
+            {graphMode === "3d" ? <RepositoryGraph3D nodes={nodes} edges={edges} selectedId={selected.id} onSelect={inspect} />
+              : <RepositoryGraph2D nodes={nodes} edges={edges} selectedId={selected.id} onSelect={inspect} />}
             <div className="graph-inspector">
               <div><strong>{selected.detail}</strong><small>{incoming.length} incoming · {outgoing.length} outgoing</small></div>
               {selected.url && <a href={selected.url} target="_blank" rel="noreferrer">View on GitHub <span className="arrow" aria-hidden="true" /></a>}
