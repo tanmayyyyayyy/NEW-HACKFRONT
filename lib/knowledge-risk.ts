@@ -40,7 +40,7 @@ export function knowledgeRiskAreas(paths: string[], pullActivity: PullActivity[]
   }
   for (const pull of pullActivity) {
     for (const path of pull.files) {
-      const { key, module } = get(path);
+      const { module } = get(path);
       if (!module.sourceFiles.size) continue;
       module.prs.add(pull.number);
       if (pull.author) {
@@ -58,7 +58,7 @@ export function knowledgeRiskAreas(paths: string[], pullActivity: PullActivity[]
     const pullCount = module.prs.size;
     const topContributorShare = pullCount ? Math.max(0, ...authors.map(([, count]) => count)) / pullCount : 0;
     const sparseDocs = module.documentationFiles.size === 0 || module.documentationFiles.size / sourceFiles < 0.08;
-    const concentrated = pullCount >= 3 && (authors.length <= 2 || topContributorShare >= 0.65);
+    const concentrated = pullCount >= 3 && ((authors.length <= 2 && authors.reduce((sum, [, count]) => sum + count, 0) === pullCount) || topContributorShare >= 0.65);
     const disconnected = pullCount >= 2 && module.decisions.size === 0;
     const signals = [
       ...(sparseDocs ? ["Sparse rationale documentation"] : []),
@@ -76,7 +76,7 @@ export function knowledgeRiskAreas(paths: string[], pullActivity: PullActivity[]
       documentationFiles: module.documentationFiles.size,
       sampledPullRequests: pullCount,
       contributors: authors.length,
-      topContributor: authors[0]?.[0],
+      ...(authors.length ? { topContributor: authors[0][0] } : {}),
       topContributorShare,
       decisionConnections: module.decisions.size,
       riskScore,

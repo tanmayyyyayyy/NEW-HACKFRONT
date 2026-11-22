@@ -220,7 +220,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
         {graph && <button type="submit" value="refresh" disabled={busy}>Refresh index</button>}
       </div>
       <label className="sf-check"><input type="checkbox" checked={privateRepo} disabled={busy}
-        onChange={event => { setPrivateRepo(event.target.checked); setToken(""); setGraph(undefined); setStatus(""); }} />Private repository</label>
+        onChange={event => { setPrivateRepo(event.target.checked); setUseAiReview(false); setReviewResult(undefined); setToken(""); setGraph(undefined); setStatus(""); }} />Private repository</label>
       {privateRepo && <label>Repository-scoped GitHub token
         <input type="password" value={token} autoComplete="off" required disabled={busy}
           onChange={event => { setToken(event.target.value); setGraph(undefined); }} />
@@ -276,7 +276,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
             <div className="review-heading"><span className="review-spark" aria-hidden="true">✳</span><div><small>HISTORICAL MEMORY REVIEW</small><h3>Catch a decision conflict before merge</h3>
               <p>Paste a pull request link to compare its changed files with earlier decisions, reversals, and review criteria.</p></div></div>
             <form className="review-form" onSubmit={event => void reviewPull(event)}>
-              <label>GitHub pull request link<input type="url" value={reviewUrl} onChange={event => setReviewUrl(event.target.value)} placeholder="https://github.com/owner/repository/pull/123" required /></label>
+              <label>GitHub pull request link<input type="url" value={reviewUrl} onChange={event => { setReviewUrl(event.target.value); setUseAiReview(false); setReviewResult(undefined); }} placeholder="https://github.com/owner/repository/pull/123" required /></label>
               <button type="submit" className="sf-submit" disabled={reviewing || !reviewUrl}>{reviewing ? "Comparing changes with repository history…" : "Review pull request"}</button>
             </form>
             <label className="review-ai-choice"><input type="checkbox" checked={useAiReview} onChange={event => setUseAiReview(event.target.checked)} />Use AI to assess decision fit, regression risk, and test rationale</label>

@@ -131,11 +131,12 @@ export async function readRepositoryGraph(repository: string, mode: "public" | "
       link(pullId(pull.number), pullId(reference), laterOverride ? "SUPERSEDES" : "REFERENCES");
     }
   }
-  const decisionPulls = new Set(graph.edges.filter(edge => (edge.kind === "REFERENCES" || edge.kind === "SUPERSEDES") && edge.from.startsWith("pull:"))
+  const snapshot = model.finish();
+  const decisionPulls = new Set(snapshot.edges.filter(edge => (edge.kind === "REFERENCES" || edge.kind === "SUPERSEDES") && edge.from.startsWith("pull:"))
     .map(edge => Number(edge.from.slice("pull:".length))));
-  graph.riskAreas = knowledgeRiskAreas(entries.map(entry => entry.path), pullActivity, decisionPulls);
-  graph.riskMapVersion = 1;
-  return persistRepositoryGraph(key, model.finish());
+  snapshot.riskAreas = knowledgeRiskAreas(files.map(entry => entry.path), pullActivity, decisionPulls);
+  snapshot.riskMapVersion = 1;
+  return persistRepositoryGraph(key, snapshot);
 }
 
 export async function persistRepositoryGraph(key: string, graph: RepositoryGraph) {

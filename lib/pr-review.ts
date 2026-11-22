@@ -244,7 +244,7 @@ async function analyzeWithAI(target: Pull, proposedFiles: ChangedFile[], history
       return [{ ...item, sources: ids }];
     });
     const recommendation: AIReview["recommendation"] = findings.some(finding => finding.severity === "conflict") ? "resolve-before-merge"
-      : findings.length || criteria.some(item => item.status === "check" || item.status === "unknown") ? "review"
+      : findings.length || criteria.some(item => item.status !== "clear") ? "review"
       : "no-conflict-found";
     return { status: "ready", recommendation, summary: reviewed.summary,
       evidence: history.map(({ id, title, author, createdAt, mergedAt, date, url }) => ({ id, title, author, createdAt, mergedAt, date, url })), criteria, findings };
@@ -264,7 +264,7 @@ export async function reviewPullRequest(repo: string, number: number, mode: "pub
     if (target.number !== number) throw new RepositoryError("GitHub returned a different pull request than requested.", 502);
     const fullName = target.base?.repo?.full_name?.toLowerCase();
     const isPrivate = target.base?.repo?.private;
-    if ((fullName && fullName !== repo) || (typeof isPrivate === "boolean" && isPrivate !== (mode === "private"))) {
+    if (fullName !== repo || isPrivate !== (mode === "private")) {
       throw new RepositoryError("Open the pull request using the matching public or private repository access mode.", 403);
     }
     proposedFiles = await api<ChangedFile[]>(`/repos/${repo}/pulls/${number}/files?per_page=100`, token);
