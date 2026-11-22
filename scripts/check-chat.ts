@@ -44,6 +44,8 @@ try {
   const publicToken = "fixture_public_token";
   process.env.GITHUB_PUBLIC_READ_TOKEN = publicToken;
   const privateToken = "github_pat_" + "fixture".repeat(4);
+  const fileCommit = "a".repeat(40);
+  const indexedFile = "src/read & write.ts";
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
     if (url.hostname === "api.sarvam.ai") {
@@ -65,6 +67,13 @@ try {
       if (url.pathname === "/repos/example/public") return Response.json({ private:false, full_name:"example/public" });
       if (url.pathname === "/repos/example/internal") return Response.json({ private: true, full_name: "example/internal" });
     }
+    if (url.pathname.endsWith("/commits") && url.searchParams.has("path")) {
+      assert.equal(url.searchParams.get("path"), indexedFile);
+      if (url.searchParams.has("until")) return Response.json([]);
+      return Response.json([{ sha: fileCommit, author: { login: "fixture" }, commit: {
+        message: "Change sync behavior", author: { date: "2025-01-02" },
+      } }]);
+    }
     if (url.pathname.endsWith("/pulls")) return Response.json([{
       number: 12, title: "Guard sync retries", body: "Prevent duplicate writes during sync retries.",
       user: { login: "fixture" }, created_at: "2025-01-01", merged_at: "2025-01-02",
@@ -85,6 +94,15 @@ try {
   assert.equal((await ask("Why sync retries? Trace #12.", publicPath)).status, 200);
   assert.equal(publicHistoryRequests.size, 5);
   assert([...publicHistoryRequests.values()].every(count => count === 1));
+  const attached = await ask("What changed in this file?", { ...publicPath, files: [indexedFile] });
+  assert.equal(attached.status, 200);
+  const fileTrail = await attached.json();
+  assert.equal(fileTrail.matchBasis, "Attached file history");
+  assert.deepEqual(new Set(fileTrail.evidence.map(({ record }: { record: { id: string } }) => record.id)), new Set(["#12", fileCommit]));
+  assert(fileTrail.evidence.every(({ record }: { record: { files: string[] } }) => record.files.includes(indexedFile)));
+  const fileCutoff = await ask("What changed in this file?", { ...publicPath, files: [indexedFile], throughDate: "2025-01-01" });
+  assert.deepEqual((await fileCutoff.json()).evidence, []);
+  assert.equal((await ask("What changed in this file?", { ...publicPath, files: ["../invalid"] })).status, 400);
   publicRepositoryVisible = false;
   assert.equal((await ask("Why sync retries?", publicPath)).status, 403);
 
@@ -113,7 +131,7 @@ try {
   assert.equal(assisted.summary, "Fixture explanation");
   assert.equal(sentToSarvam, 1);
   authorized = false;
-  assert.equal((await ask("Why sync retries?", privatePath, "fixture_read_token")).status, 403);
+  assert.equal((await ask("Why sync retries?", { ...privatePath, files: [indexedFile] }, "fixture_read_token")).status, 403);
   await account.revoke();
   assert.equal((await ask("Why sync retries?", privatePath, "fixture_read_token")).status, 401);
   const saved = await driver.executeQuery("MATCH (r:SkillForgeChatRun) RETURN count(r) AS count");

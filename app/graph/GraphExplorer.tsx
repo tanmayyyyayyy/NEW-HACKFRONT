@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import type { GraphEdge, GraphNode, RepositoryGraph } from "../../lib/graph-types";
 import type { AIReview, ReviewFinding } from "../../lib/pr-review";
 import { importSpecifiers, sourceFileLimit, sourceFilePattern, treeEntryLimit } from "../../lib/graph-model";
+import { SpatialGraph } from "./SpatialGraph";
 import { RepositoryGraph3D } from "./RepositoryGraph3D";
 
 type View = "files" | "imports" | "history" | "conflicts" | "risk" | "review";
@@ -15,6 +16,11 @@ const views: { id: View; label: string; empty: string }[] = [
   { id: "risk", label: "Knowledge risk map", empty: "No source modules were available to map." },
   { id: "review", label: "PR reviewer", empty: "Review a pull request against recorded decisions." },
 ];
+const labels: Record<GraphEdge["kind"], string> = {
+  CONTAINS: "Contains", IMPORTS: "Imports", PARENT: "Parent commit", INCLUDES: "Includes commit",
+  COVERS: "Covers", REFERENCES: "References", SUPERSEDES: "Supersedes",
+};
+const perLane = 7;
 const ignoredFolders = new Set([".git", "node_modules", ".next", "dist", "build", "coverage"]);
 
 function belongs(edge: GraphEdge, view: View) {
@@ -44,6 +50,9 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const [view, setView] = useState<View>("files");
   const [focus, setFocus] = useState("");
   const [search, setSearch] = useState("");
+  const [zoom, setZoom] = useState(100);
+  const [dimension, setDimension] = useState<"2D" | "3D" | "Full map">("Full map");
+  const [page, setPage] = useState(0);
   const [nodeLimit, setNodeLimit] = useState(36);
   const [overridesOnly, setOverridesOnly] = useState(false);
   const [reviewUrl, setReviewUrl] = useState("");
@@ -86,11 +95,19 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const selected = byId.get(focus) ?? (view === "files" ? nodes[0] : byId.get(edges[0]?.from) ?? nodes[0]);
   const incoming = selected ? edges.filter(edge => edge.to === selected.id) : [];
   const outgoing = selected ? edges.filter(edge => edge.from === selected.id) : [];
+  const left = incoming.slice(page * perLane, (page + 1) * perLane);
+  const right = outgoing.slice(page * perLane, (page + 1) * perLane);
+  const rows = Math.max(left.length, right.length, 1);
+  const height = Math.max(296, rows * 72 + 100);
+  const middle = height / 2;
+  const rowY = (index: number, count: number) => middle + (index - (count - 1) / 2) * 72;
   const selectedView = views.find(item => item.id === view)!;
   const riskAreas = graph?.riskAreas ?? [];
 
+  const headings = view === "files" ? ["Parent folder", "Contents"] : view === "imports" ? ["Imported by", "Imports"] : view === "conflicts" ? ["Newer decision", "Earlier decision"] : ["Incoming links", "Outgoing links"];
+
   function inspect(id: string) {
-    setFocus(id);
+    setFocus(id); setPage(0);
   }
 
   function changeView(id: View) {
@@ -182,6 +199,15 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
     } finally { setBusy(false); }
   }
 
+  function nodeButton(node: GraphNode, x?: number, y?: number, edge?: GraphEdge) {
+    return <button type="button" key={edge ? edge.kind + node.id : node.id} className={"graph-node graph-" + node.kind}
+      style={x === undefined ? undefined : { left: x + "%", top: y }} aria-pressed={node.id === selected?.id} onClick={() => inspect(node.id)}>
+      <small>{edge ? labels[edge.kind] : node.kind}</small>
+      <strong title={node.detail}>{node.label}</strong>
+      {node.kind === "pull" || node.kind === "commit" ? <span title={node.detail}>{node.detail}</span> : null}
+    </button>;
+  }
+
   async function reviewPull(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (reviewing) return;
@@ -245,6 +271,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
     {graph && <section className="graph-workbench" aria-label="Indexed repository">
       <header className="graph-bar">
         <div><strong>{graph.repository}</strong> <code>{graph.revision.slice(0, 8)}</code></div>
+        {graph.source !== "folder" && <a href={"/workspace?" + new URLSearchParams({ repo: graph.repository, path: privateRepo ? "private" : "public" })}>Open in chat</a>}
         <nav className="workspace-modes" aria-label="Graph view">
           {views.map(item => <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => changeView(item.id)}>{item.label}{item.id === "conflicts" && conflictEdges.length > 0 ? ` · ${conflictEdges.length}` : item.id === "risk" && riskAreas.length > 0 ? ` · ${riskAreas.length}` : ""}</button>)}
         </nav>
@@ -362,12 +389,50 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
           </section>}
           <div className="graph-tools">
             <h2>{selectedView.label}</h2>
+            <div className="workspace-modes" role="group" aria-label="Graph layout">
+              {(["2D", "3D", "Full map"] as const).map(layout => <button key={layout} type="button" aria-pressed={dimension === layout}
+                onClick={() => setDimension(layout)}>{layout}</button>)}
+            </div>
+            {dimension === "2D" && <div className="graph-zoom" aria-label="Diagram zoom">
+              <button type="button" aria-label="Zoom out" disabled={zoom <= 65} onClick={() => setZoom(value => Math.max(65, value - 15))}>−</button>
+              <button type="button" aria-label="Reset zoom" onClick={() => setZoom(100)}>{zoom}%</button>
+              <button type="button" aria-label="Zoom in" disabled={zoom >= 160} onClick={() => setZoom(value => Math.min(160, value + 15))}>+</button>
+            </div>}
           </div>
           {selected ? <>
-            <RepositoryGraph3D nodes={nodes} edges={edges} selectedId={selected.id} onSelect={inspect} />
+            {dimension === "Full map" ? <RepositoryGraph3D nodes={nodes} edges={edges} selectedId={selected.id} onSelect={inspect} /> : dimension === "3D" ? <SpatialGraph selected={selected} incoming={left} outgoing={right} byId={byId} inspect={inspect} /> : <>
+            <div className="graph-viewport" tabIndex={0} aria-label="Scrollable repository diagram">
+              <div className="graph-canvas" style={{ height, minWidth: 620, width: Math.max(100, zoom) + "%", zoom: zoom < 100 ? zoom / 100 : undefined }}>
+                <div className="graph-lanes"><span>{headings[0]}</span><span>Selected node</span><span>{headings[1]}</span></div>
+                <svg className="graph-wires" viewBox={`0 0 1000 ${height}`} preserveAspectRatio="none" aria-hidden="true">
+                  <defs><marker id="graph-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+                    <path d="m2 1 4 3-4 3" />
+                  </marker></defs>
+                  {left.map((edge, i) => <path key={edge.kind + edge.from} className={edge.kind === "SUPERSEDES" ? "wire-override" : ""}
+                    markerEnd="url(#graph-arrow)" d={`M 180 ${rowY(i, left.length)} C 290 ${rowY(i, left.length)} 305 ${middle} 365 ${middle}`} />)}
+                  {right.map((edge, i) => <path key={edge.kind + edge.to} className={edge.kind === "SUPERSEDES" ? "wire-override" : ""}
+                    markerEnd="url(#graph-arrow)" d={`M 500 ${middle} C 610 ${middle} 618 ${rowY(i, right.length)} 684 ${rowY(i, right.length)}`} />)}
+                </svg>
+                {left.map((edge, i) => nodeButton(byId.get(edge.from)!, 18, rowY(i, left.length), edge))}
+                {nodeButton(selected, 50, middle)}
+                {right.map((edge, i) => nodeButton(byId.get(edge.to)!, 82, rowY(i, right.length), edge))}
+              </div>
+            </div>
+            <div className="graph-compact" aria-label="Repository diagram">
+              {left.length > 0 && <div className="graph-compact-lane"><small>{headings[0]}</small>
+                {left.map(edge => nodeButton(byId.get(edge.from)!, undefined, undefined, edge))}</div>}
+              <div className="graph-compact-lane"><small>Selected node</small>{nodeButton(selected)}</div>
+              {right.length > 0 && <div className="graph-compact-lane"><small>{headings[1]}</small>
+                {right.map(edge => nodeButton(byId.get(edge.to)!, undefined, undefined, edge))}</div>}
+            </div>
+            </>}
             <div className="graph-inspector">
               <div><strong>{selected.detail}</strong><small>{incoming.length} incoming · {outgoing.length} outgoing</small></div>
               {selected.url && <a href={selected.url} target="_blank" rel="noreferrer">View on GitHub <span className="arrow" aria-hidden="true" /></a>}
+              {dimension !== "Full map" && Math.max(incoming.length, outgoing.length) > perLane && <div className="graph-zoom">
+                <button type="button" disabled={page === 0} onClick={() => setPage(value => value - 1)}>Previous links</button>
+                <button type="button" disabled={(page + 1) * perLane >= Math.max(incoming.length, outgoing.length)} onClick={() => setPage(value => value + 1)}>More links</button>
+              </div>}
             </div>
           </> : <p className="graph-notice">{graph.source === "folder" && view === "history" ? "Connect the GitHub repository to see pull requests and commit history." : overridesOnly && view === "history" ? "No explicit supersession was found in the indexed pull requests." : selectedView.empty}</p>}
         </div>

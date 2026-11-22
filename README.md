@@ -8,18 +8,18 @@ A new maintainer opens Futon and finds that the reader waits for chapter updates
 
 ## Repository graph
 
-Open **Graph** and index a GitHub repository URL or a local folder. SkillForge stores each index in Neo4j and shows five ways to explore it in an interactive 3D graph:
+Open **Graph** and index a GitHub repository URL or a local folder. SkillForge stores each index in Neo4j and shows six ways to explore it in an interactive 3D graph:
 
 - **File structure** shows folders, their parent, and their contents.
 - **Module imports** shows statically detected imports between JavaScript and TypeScript files and external packages. It samples up to 18 source files and recognizes relative imports and conventional `@/` paths. Runtime calls and custom compiler aliases can be missing.
 - **Decision history** shows recent pull requests, commits, commit parents, and explicit references between them. Use **Superseded decisions only** to see explicit replacement declarations from merged PRs.
-- **Decision conflicts** pairs a later merged pull request with the earlier PR it names. Each pair shows available authors, merge dates, the original PR text, and links to both records. The detector looks for explicit replacement language or a stated change to the default, behavior, approach, or architecture alongside a PR reference. It does not infer conflicts from similar wording alone.
+- **Decision conflicts** pairs a later merged pull request with the earlier PR it names. Each pair shows available authors, merge dates, the original PR text, and links to both records. The detector looks for explicit replacement language or a stated change to the default, behavior, approach, or architecture in the same sentence as a PR reference. It does not infer conflicts from similar wording alone.
 - **Knowledge risk map** groups source files into modules and surfaces sparse rationale documentation, contributor concentration, and missing links between sampled pull requests. GitHub ownership signals come from up to 12 recent PR file lists; local folders can show documentation gaps but do not include historical contributors or decisions. Risk signals are a triage aid based on the sampled index, not a code quality or personnel assessment.
 - **PR reviewer** accepts a GitHub pull request link, compares its changed files with earlier merged PRs on those files, and surfaces possible conflicts with cited decisions and draft review comments. Optional AI review checks decision alignment, known reversals, regression risk, and test rationale. It only states a direct conflict when the cited source supports it; matching a file alone is shown as historical context. No comments are posted to GitHub.
 
 Drag the 3D graph to orbit and use the on-canvas controls or arrow keys to rotate and zoom. The node list remains available for keyboard selection and when WebGL is unavailable.
 
-Choose a node, search by name or path, and zoom the diagram. GitHub nodes link to their source. Private repositories require sign-in and a scoped read token. Local folder indexing also requires sign-in. It sends file paths and detected imports, skips common build folders and environment files, and leaves GitHub history to the GitHub importer. On public deployments, set `APP_ORIGIN` to the public HTTPS origin so robots and sitemap metadata point to the correct host.
+Choose a node and switch between the **2D** relationship diagram and the orbitable **3D** view. Both keep the current selection. GitHub nodes link to their source. Choose **Open in chat** to carry the repository into the workspace. Private repositories require sign-in and a scoped read token. Local folder indexing also requires sign-in. It sends file paths and detected imports, skips common build folders and environment files, and leaves GitHub history to the GitHub importer. On public deployments, set `APP_ORIGIN` to the public HTTPS origin so robots and sitemap metadata point to the correct host.
 
 The optional AI reviewer uses the configured Gemini service when **Use AI** is checked. It sends up to 18 changed file excerpts and matching historical PR descriptions or diffs for analysis. Otherwise, the reviewer only runs the deterministic file and explicit reversal checks. The history scan is bounded to recent merged PRs; it cannot establish undocumented conversations or guarantee a clean review. Review drafts remain with the developer until they choose to post them.
 
@@ -91,15 +91,17 @@ flowchart LR
 
 **1. Collect a bounded sample.** Live retrieval requests up to 20 recently updated closed PRs, 20 issue-list entries and 12 recent commits. Up to three referenced threads can trigger further requests for comments and, for PRs, changed file paths. The Futon demo uses its bundled snapshot and can also trace captured changes to Android preference keys. Coverage varies with the question and source. [History collector and graph query](lib/repository-chat.ts)
 
+Use **Attach files** to search the repository index and select up to three paths. For each path the workspace checks up to two GitHub commits and up to one associated PR per commit. Use the microphone button to dictate into the same composer.
+
 **2. Connect the records.** A temporary `SkillForgeChatRun` node owns the evidence records for one request. The graph uses three kinds of historical relationship.
 
 | Relationship | Meaning |
 | --- | --- |
-| `REFERENCES` | A record mentions another issue or PR in the sample. |
+| `REFERENCES` | A record mentions another issue or PR, or GitHub associates a PR with a commit that changed an attached path. |
 | `DISCUSSION` | A comment belongs to the selected thread. |
 | `SUPERSEDES` | A later record explicitly replaces an earlier one, or the Futon preference history shows a later PR removing a key an earlier PR added at the same path. |
 
-**3. Retrieve the trail.** Parameterized Cypher prioritizes explicit issue or PR references. Without a reference, the query requires at least two overlapping search terms and a minimum weighted score. It returns up to five records with up to eight related entries per record. The UI shows the match basis, sampled record count, source links and retrieval query. The match basis describes how the source was found. It does not measure the probability that an explanation is true. The transaction rolls back after retrieval, so the database user needs write access even for the demo.
+**3. Retrieve the trail.** Parameterized Cypher ranks explicit issue or PR references first and attached-file matches next. A question without references, attachments or prior sources requires at least two overlapping search terms and a minimum weighted score. The query returns up to five records with up to eight related entries per record. The UI shows how the records were found, the sample size, source links and the retrieval query. The transaction rolls back after retrieval, so the database user needs write access even for the demo.
 
 **4. Explain with consent.** If the user checks **Let AI explain the evidence**, the server can send the question and selected evidence to Sarvam for an English, Hindi or Hinglish explanation. If Sarvam fails and OpenRouter is configured, the server tries the same evidence there. The UI names the provider that answered and keeps GitHub sources available when both fail. Empty retrieval skips both providers. The browser can also dictate questions and read prompts or explanations aloud when its speech services support them. [Query and model boundary](app/api/ask/route.ts)
 
@@ -122,7 +124,8 @@ curl -sS http://localhost:3000/api/ask \
 | --- | --- |
 | `repo`, `mode` | GitHub repository name or URL and either `public` or `private`. |
 | `question`, `language` | A 3–500 character question and one of `English`, `Hindi` or `Hinglish`. |
-| `contextIds` | Optional list of up to five source IDs from a prior answer. Explicit references in the question take precedence. |
+| `contextIds` | Optional list of up to five source IDs from a prior answer. Explicit references and attached files take precedence over these IDs. |
+| `files` | Optional list of up to three repository-relative file paths for commit and PR history lookup. |
 | `throughDate`, `sarvam` | Optional ISO date cutoff and optional model consent flag. Consent defaults to false. |
 
 The response includes `evidence[].record`, relationship entries in `evidence[].links`, `recordCount`, `matchBasis`, `query`, and an optional `summary`. An empty evidence array is a valid result. Private calls require both a signed-in session and the engineer's bearer token. The route checks request origin, caps the body at 8 KiB and returns `Cache-Control: no-store`.

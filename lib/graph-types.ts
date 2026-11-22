@@ -35,6 +35,7 @@ export type KnowledgeRiskArea = {
 
 export type RepositoryGraph = {
   repository: string;
+  analysisVersion?: number;
   source?: "folder";
   revision: string;
   indexedAt: string;
