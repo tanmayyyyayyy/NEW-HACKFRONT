@@ -8,7 +8,7 @@ export default async function GraphPage({ searchParams }: { searchParams: Promis
   return <><Mast current="graph" /><main className="sf-shell" id="main-content">
     <header className="section-title">
       <h1>Repository graph</h1>
-      <p>Index a GitHub repository or local folder. Explore its file tree and module imports, then follow decisions in the connected GitHub history.</p>
+      <p>Explore code structure, module imports, and decisions in an interactive 3D graph. Review a pull request against its repository’s decision history and spot changes that may revive a reversed behavior.</p>
     </header>
     <GraphExplorer initialRepo={repo?.slice(0, 170) || ""} initialPrivate={path === "private"} />
   </main></>;
