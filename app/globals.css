@@ -313,8 +313,62 @@ details > summary { cursor: pointer; }
 .risk-card ul { display: grid; gap: 4px; margin: 9px 0 12px; padding-left: 17px; color: #d9c7bd; font-size: .76rem; }
 .risk-card li::marker { color: var(--accent); }
 .risk-card button { color: var(--accent); background: transparent; border-color: #564944; font-size: .76rem; }
+.review-overview { display: grid; gap: 16px; padding: clamp(16px,3vw,28px); border-bottom: 1px solid var(--line); background: radial-gradient(ellipse at 95% 0%,#4c312b75 0,transparent 45%),linear-gradient(145deg,#1b191e,#14161d); }
+.review-heading { display: flex; align-items: center; gap: 13px; }
+.review-heading h3 { margin: 4px 0; font-size: 1.4rem; }
+.review-heading p { margin: 0; color: var(--muted); }
+.review-heading small,.review-ai-results > div:first-child > small { color: var(--accent); font-size: .68rem; font-weight: 740; letter-spacing: .13em; }
+.review-spark { display: grid; place-items: center; width: 48px; height: 48px; flex: none; border: 1px solid #ffab8070; border-radius: 50%; color: var(--accent); background: #ffab8014; font-size: 1.8rem; box-shadow: 0 0 25px #ffab8020; }
+.review-form { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; }
+.review-form label { flex: 1 1 350px; }
+.review-form button { min-height: 43px; }
+.review-ai-choice { display: flex; align-items: center; gap: 9px; width: fit-content; color: var(--ink); font-size: .86rem; }
+.review-ai-choice input { flex: none; }
+.review-scope,.review-coverage { margin: 0; color: var(--muted); font-size: .78rem; }
+.review-status { margin: 0; color: #ffd0ac; font-size: .85rem; }
+.review-result-heading { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 14px 0 0; border-top: 1px solid var(--line); }
+.review-result-heading small { color: var(--accent); font-size: .68rem; font-weight: 730; letter-spacing: .11em; }
+.review-result-heading h4 { margin: 5px 0; font-size: 1.05rem; overflow-wrap: anywhere; }
+.review-result-heading p { margin: 0; color: var(--muted); font-size: .8rem; }
+.review-result-heading > span { flex: none; padding: 5px 9px; border: 1px solid #ffab8050; border-radius: 999px; color: var(--accent); font-size: .78rem; }
+.review-ai-results { display: grid; gap: 12px; padding: 14px; border: 1px solid #52433e; border-radius: 10px; background: linear-gradient(135deg,#252026,#18181e); }
+.review-ai-results > div:first-child > p { margin: 5px 0 0; color: #e8dfda; }
+.review-criteria { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,190px),1fr)); gap: 8px; }
+.review-criteria article { display: grid; align-content: start; gap: 5px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #121218a8; }
+.review-criteria article > strong { font-size: .83rem; }
+.review-criteria article > p { margin: 0; color: var(--muted); font-size: .77rem; }
+.review-criterion-status { width: fit-content; padding: 2px 6px; border-radius: 999px; font-size: .65rem; font-weight: 740; text-transform: uppercase; letter-spacing: .06em; }
+.criterion-conflict { color: #ffb29b; background: #ff846b22; }
+.criterion-check { color: #ffd08b; background: #ffc17122; }
+.criterion-clear { color: #a5dfd2; background: #7dc4b622; }
+.criterion-unknown { color: var(--muted); background: #ffffff0d; }
+.review-source-ref { color: var(--accent); font: .68rem var(--mono); }
+.review-ai-finding,.review-finding { display: grid; gap: 12px; min-width: 0; padding: 13px; border: 1px solid #665044; border-radius: 9px; background: #17151a; }
+.review-ai-finding { border-color: #785743; }
+.review-ai-finding > p,.review-finding > p { margin: 0; color: #ddd3ce; font-size: .85rem; }
+.review-ai-finding > blockquote { margin: 0; padding: 9px 11px; border-left: 2px solid #ffab80; background: #211e23; color: #eee1d7; font-size: .81rem; }
+.review-finding-top { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 7px; }
+.review-finding-top span { color: #ffc39f; font-size: .67rem; font-weight: 750; letter-spacing: .09em; }
+.review-finding-top code { overflow-wrap: anywhere; color: #d8c7bd; font-size: .76rem; }
+.review-history-pair { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.review-history-pair > div { display: grid; align-content: start; gap: 7px; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: #111116; }
+.review-history-pair small { font-size: .65rem; color: var(--accent); }
+.review-history-pair a { font-size: .82rem; font-weight: 650; overflow-wrap: anywhere; }
+.review-history-pair blockquote { max-height: 145px; overflow: auto; margin: 0; color: var(--muted); font-size: .76rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.review-finding details pre { max-height: 180px; white-space: pre-wrap; font-size: .74rem; }
+.review-comment { padding: 11px; border: 1px solid #53463e; border-radius: 7px; background: #201c20; }
+.review-comment > small { color: var(--accent); font-size: .66rem; font-weight: 730; letter-spacing: .1em; }
+.review-comment > p { margin: 4px 0 10px; color: #eee4de; font-size: .82rem; }
+.review-comment button { padding: 4px 8px; color: var(--accent); background: transparent; border-color: #675047; font-size: .74rem; }
+.review-source-links { display: flex; flex-wrap: wrap; gap: 5px 14px; }
+.review-source-links a,.review-diff-link { font-size: .76rem; }
+.review-findings { display: grid; gap: 10px; }
+.review-strong { border-color: #875542; box-shadow: inset 3px 0 #ff9d74; }
+.review-context { border-color: #554d44; box-shadow: inset 3px 0 #d7b075; }
+.review-empty { margin: 0; padding: 13px; border: 1px dashed #574d4d; border-radius: 8px; color: var(--muted); font-size: .84rem; }
 @media (max-width: 620px) {
   .conflict-decisions { grid-template-columns: minmax(0,1fr); }
+  .review-history-pair { grid-template-columns: minmax(0,1fr); }
   .conflict-old::before { content: "↓"; right: auto; left: 50%; top: -24px; transform: translateX(-50%); }
   .graph3d-surface { min-height: 365px; height: 55vh; }
   .graph3d-controls { top: 10px; right: 10px; }

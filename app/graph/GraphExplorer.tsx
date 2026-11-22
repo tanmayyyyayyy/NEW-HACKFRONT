@@ -2,16 +2,18 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import type { GraphEdge, GraphNode, RepositoryGraph } from "../../lib/graph-types";
+import type { AIReview, ReviewFinding } from "../../lib/pr-review";
 import { importSpecifiers, sourceFileLimit, sourceFilePattern, treeEntryLimit } from "../../lib/graph-model";
 import { RepositoryGraph3D } from "./RepositoryGraph3D";
 
-type View = "files" | "imports" | "history" | "conflicts" | "risk";
+type View = "files" | "imports" | "history" | "conflicts" | "risk" | "review";
 const views: { id: View; label: string; empty: string }[] = [
   { id: "files", label: "File structure", empty: "No files or folders available." },
   { id: "imports", label: "Module imports", empty: "No static JavaScript or TypeScript imports were found in the scanned files." },
   { id: "history", label: "Decision history", empty: "No pull requests or commits were found in the indexed history." },
   { id: "conflicts", label: "Decision conflicts", empty: "No linked decision updates were found in the indexed pull request history." },
   { id: "risk", label: "Knowledge risk map", empty: "No source modules were available to map." },
+  { id: "review", label: "PR reviewer", empty: "Review a pull request against recorded decisions." },
 ];
 const ignoredFolders = new Set([".git", "node_modules", ".next", "dist", "build", "coverage"]);
 
@@ -44,6 +46,11 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const [search, setSearch] = useState("");
   const [nodeLimit, setNodeLimit] = useState(36);
   const [overridesOnly, setOverridesOnly] = useState(false);
+  const [reviewUrl, setReviewUrl] = useState("");
+  const [useAiReview, setUseAiReview] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  const [reviewResult, setReviewResult] = useState<{ pull: { number: number; title: string; author: string; date: string; url: string; state: string }; findings: ReviewFinding[]; coverage: { changedFiles: number; historicalReversals: number; historyWindow: string }; aiReview: AIReview }>();
 
   const { nodes, edges, byId } = useMemo(() => {
     if (view === "risk") {
@@ -175,6 +182,31 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
     } finally { setBusy(false); }
   }
 
+  async function reviewPull(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (reviewing) return;
+    setReviewing(true); setReviewError(""); setReviewResult(undefined);
+    try {
+      const response = await fetch("/api/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(privateRepo && { Authorization: "Bearer " + token }) },
+        body: JSON.stringify({ pullUrl: reviewUrl, mode: privateRepo ? "private" : "public", aiReview: useAiReview }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The pull request could not be reviewed.");
+      setReviewResult(result);
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : "The pull request could not be reviewed.");
+    } finally { setReviewing(false); }
+  }
+
+  async function copyReviewComment(comment: string) {
+    try {
+      await navigator.clipboard.writeText(comment);
+      setReviewError("Draft comment copied. Paste it into your GitHub review when ready.");
+    } catch { setReviewError("Clipboard access is unavailable; select the draft text to copy it."); }
+  }
+
   return <>
     <div className="workspace-modes graph-source" aria-label="Repository source">
       <button type="button" aria-pressed={source === "github"} onClick={() => changeSource("github")} disabled={busy}>GitHub repository</button>
@@ -225,6 +257,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
             onChange={event => { setOverridesOnly(event.target.checked); inspect(""); }} />Superseded decisions only</label>}
           {view === "conflicts" && <p className="conflict-hint">Later merged PRs that explicitly replace an earlier PR or describe a changed default, behavior, approach, or architecture while referencing it.</p>}
           {view === "risk" && <p className="conflict-hint">Color and size reflect the number and severity of evidence based risk signals.</p>}
+          {view === "review" && <p className="conflict-hint">Compare a pull request with earlier decisions and known reversals. Suggested comments are drafts; nothing is posted to GitHub.</p>}
           {!lookup && imported.length > 0 && <div className="graph-highlights">
             <small>Most imported in this scan</small>
             {imported.map(item => <button key={item.id} type="button" onClick={() => inspect(item.id)}>
@@ -239,6 +272,51 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
           {matches.length > nodeLimit && <button type="button" onClick={() => setNodeLimit(limit => limit + 36)}>Show more nodes</button>}
         </aside>
         <div className="graph-stage">
+          {view === "review" && <section className="review-overview" aria-label="AI pull request reviewer with historical memory">
+            <div className="review-heading"><span className="review-spark" aria-hidden="true">✳</span><div><small>HISTORICAL MEMORY REVIEW</small><h3>Catch a decision conflict before merge</h3>
+              <p>Paste a pull request link to compare its changed files with earlier decisions, reversals, and review criteria.</p></div></div>
+            <form className="review-form" onSubmit={event => void reviewPull(event)}>
+              <label>GitHub pull request link<input type="url" value={reviewUrl} onChange={event => setReviewUrl(event.target.value)} placeholder="https://github.com/owner/repository/pull/123" required /></label>
+              <button type="submit" className="sf-submit" disabled={reviewing || !reviewUrl}>{reviewing ? "Comparing changes with repository history…" : "Review pull request"}</button>
+            </form>
+            <label className="review-ai-choice"><input type="checkbox" checked={useAiReview} onChange={event => setUseAiReview(event.target.checked)} />Use AI to assess decision fit, regression risk, and test rationale</label>
+            <p className="review-scope">AI analysis is optional and uses the configured Gemini service. When enabled, the PR diff and matching history excerpts are sent to that service. Deterministic file and reversal checks run either way. Comments are drafts; nothing is posted to GitHub.</p>
+            {reviewError && <p role="status" className="review-status">{reviewError}</p>}
+            {reviewResult && <>
+              <div className="review-result-heading"><div><small>REVIEWED PR #{reviewResult.pull.number}</small><h4><a href={reviewResult.pull.url} target="_blank" rel="noreferrer">{reviewResult.pull.title} ↗</a></h4>
+                <p>@{reviewResult.pull.author} · {dateLabel(reviewResult.pull.date)} · {reviewResult.pull.state}</p></div>
+                <span>{reviewResult.findings.length + reviewResult.aiReview.findings.length} findings</span></div>
+              <p className="review-coverage">Compared {reviewResult.coverage.changedFiles} changed files against {reviewResult.coverage.historicalReversals} explicitly linked reversals and {reviewResult.coverage.historyWindow.toLowerCase()}.</p>
+              {reviewResult.aiReview.status === "ready" && <section className="review-ai-results" aria-label="AI review criteria">
+                <div><small>AI REVIEW</small><p>{reviewResult.aiReview.summary}</p></div>
+                <div className="review-criteria">{reviewResult.aiReview.criteria.map(item => <article key={item.name}>
+                  <span className={`review-criterion-status criterion-${item.status}`}>{item.status === "conflict" ? "Conflict" : item.status === "check" ? "Check" : item.status === "clear" ? "Clear" : "Unknown"}</span>
+                  <strong>{item.name}</strong><p>{item.detail}</p>
+                  {item.sources.map(id => <span className="review-source-ref" key={id}>{id}</span>)}
+                </article>)}</div>
+                {reviewResult.aiReview.findings.map((finding, index) => {
+                  const cited = reviewResult.aiReview.evidence.filter(source => finding.sources.includes(source.id));
+                  return <article className="review-ai-finding" key={`${finding.path}:${index}`}>
+                    <div className="review-finding-top"><span>{finding.severity === "conflict" ? "DECISION CONFLICT" : finding.severity === "possible-conflict" ? "POSSIBLE CONFLICT" : "REVIEW NOTE"}</span><code>{finding.path}</code></div>
+                    <p>{finding.explanation}</p><blockquote>{finding.evidence}</blockquote>
+                    <div className="review-comment"><small>SUGGESTED REVIEW COMMENT</small><p>{finding.comment}</p><button type="button" onClick={() => void copyReviewComment(finding.comment)}>Copy comment draft</button></div>
+                    <p className="review-source-links">Evidence: {cited.map(source => <a key={source.id} href={source.url} target="_blank" rel="noreferrer">{source.id} · @{source.author} · {dateLabel(source.date)} ↗</a>)}</p>
+                  </article>;
+                })}
+              </section>}
+              {reviewResult.aiReview.status === "not-configured" && <p className="review-coverage">AI review was selected, but no Gemini service is configured. Historical file checks are still shown below.</p>}
+              {reviewResult.aiReview.status === "unavailable" && <p className="review-coverage">AI review could not complete. Historical file checks are still shown below.</p>}
+              {reviewResult.findings.length ? <div className="review-findings">{reviewResult.findings.map((finding, index) => <article className={`review-finding ${finding.confidence === "changed-lines" ? "review-strong" : "review-context"}`} key={`${finding.path}:${finding.older.number}:${finding.reversal.number}:${index}`}>
+                <div className="review-finding-top"><span>{finding.confidence === "changed-lines" ? "POSSIBLE REINTRODUCTION" : "HISTORICAL CONTEXT"}</span><code>{finding.path}</code></div>
+                <p>{finding.rationale}</p>
+                <div className="review-history-pair"><div><small>EARLIER DECISION · {dateLabel(finding.older.date)} · @{finding.older.author}</small><a href={finding.older.url} target="_blank" rel="noreferrer">PR #{finding.older.number}: {finding.older.title}</a><blockquote>{finding.older.evidence}</blockquote></div>
+                  <div><small>LATER REVERSAL · {dateLabel(finding.reversal.date)} · @{finding.reversal.author}</small><a href={finding.reversal.url} target="_blank" rel="noreferrer">PR #{finding.reversal.number}: {finding.reversal.title}</a><blockquote>{finding.reversal.evidence}</blockquote></div></div>
+                <details><summary>Proposed change evidence</summary><pre>{finding.proposedEvidence}</pre></details>
+                <div className="review-comment"><small>SUGGESTED REVIEW COMMENT</small><p>{finding.comment}</p><button type="button" onClick={() => void copyReviewComment(finding.comment)}>Copy comment draft</button></div>
+                <a className="review-diff-link" href={reviewResult.pull.url + "/files"} target="_blank" rel="noreferrer">Open changed files on GitHub ↗</a>
+              </article>)}</div> : reviewResult.aiReview.findings.length === 0 && <p className="review-empty">No file-level historical reversal matched this proposal. Check the AI criteria above, if enabled; this bounded review is not an approval guarantee.</p>}
+            </>}
+          </section>}
           {view === "risk" && <section className="risk-overview" aria-label="Institutional knowledge risk summary">
             <div className="risk-overview-heading"><span className="risk-radar" aria-hidden="true">◎</span><div><small>INSTITUTIONAL KNOWLEDGE SCAN</small>
               <h3>{riskAreas.length ? `${riskAreas.length} areas to review` : "No risk signals found"}</h3>

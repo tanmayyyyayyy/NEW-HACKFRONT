@@ -15,10 +15,13 @@ Open **Graph** and index a GitHub repository URL or a local folder. SkillForge s
 - **Decision history** shows recent pull requests, commits, commit parents, and explicit references between them. Use **Superseded decisions only** to see explicit replacement declarations from merged PRs.
 - **Decision conflicts** pairs a later merged pull request with the earlier PR it names. Each pair shows available authors, merge dates, the original PR text, and links to both records. The detector looks for explicit replacement language or a stated change to the default, behavior, approach, or architecture alongside a PR reference. It does not infer conflicts from similar wording alone.
 - **Knowledge risk map** groups source files into modules and surfaces sparse rationale documentation, contributor concentration, and missing links between sampled pull requests. GitHub ownership signals come from up to 12 recent PR file lists; local folders can show documentation gaps but do not include historical contributors or decisions. Risk signals are a triage aid based on the sampled index, not a code quality or personnel assessment.
+- **PR reviewer** accepts a GitHub pull request link, compares its changed files with earlier merged PRs on those files, and surfaces possible conflicts with cited decisions and draft review comments. Optional AI review checks decision alignment, known reversals, regression risk, and test rationale. It only states a direct conflict when the cited source supports it; matching a file alone is shown as historical context. No comments are posted to GitHub.
 
 Drag the 3D graph to orbit and use the on-canvas controls or arrow keys to rotate and zoom. The node list remains available for keyboard selection and when WebGL is unavailable.
 
 Choose a node, search by name or path, and zoom the diagram. GitHub nodes link to their source. Private repositories require sign-in and a scoped read token. Local folder indexing also requires sign-in. It sends file paths and detected imports, skips common build folders and environment files, and leaves GitHub history to the GitHub importer. On public deployments, set `APP_ORIGIN` to the public HTTPS origin so robots and sitemap metadata point to the correct host.
+
+The optional AI reviewer uses the configured Gemini service when **Use AI** is checked. It sends up to 18 changed file excerpts and matching historical PR descriptions or diffs for analysis. Otherwise, the reviewer only runs the deterministic file and explicit reversal checks. The history scan is bounded to recent merged PRs; it cannot establish undocumented conversations or guarantee a clean review. Review drafts remain with the developer until they choose to post them.
 
 ## Quick start
 
@@ -138,7 +141,7 @@ The response includes `evidence[].record`, relationship entries in `evidence[].l
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional Google OAuth credentials. Register `<APP_ORIGIN>/api/auth/callback/google`. |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Optional verified sender for signup verification and password recovery. |
 
-Private GitHub personal tokens stay in tab memory and travel to the SkillForge server for authorized GitHub requests. Reloading the page requires re-entry. Query graphs are temporary. A downloaded trail is a separate local file containing the exported evidence. Review the organization's data-sharing policy before enabling hosted AI for private records. [Example environment](.env.example) · [Private credential handoff](app/private-transfer.ts)
+Private GitHub personal tokens stay in tab memory and travel to the SkillForge server for authorized GitHub requests. Reloading the page requires re-entry. Query graphs are temporary. A downloaded trail is a separate local file containing the exported evidence. The optional PR reviewer sends selected private PR excerpts to Gemini only when the reviewer explicitly checks **Use AI**. Review the organization's data-sharing policy before enabling hosted AI for private records. [Example environment](.env.example) · [Private credential handoff](app/private-transfer.ts)
 
 ## Developer map
 

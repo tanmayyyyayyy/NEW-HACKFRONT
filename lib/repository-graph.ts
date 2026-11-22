@@ -15,7 +15,7 @@ const shaPattern = /^[a-f0-9]{40}$/i;
 const data = async <T>(path: string, token?: string) => JSON.parse(await requestGithub(path, token)) as T;
 const pullId = (number: number) => "pull:" + number;
 const commitId = (sha: string) => "commit:" + sha;
-function supersededPullReferences(text: string) {
+export function supersededPullReferences(text: string) {
   const references = new Set(Array.from(text.matchAll(/\b(?:reverts?|supersedes?|replaces?)\s+(?:PR\s+)?#(\d+)/gi), match => Number(match[1])));
   const changesDecision = /\b(?:chang(?:e|es|ed|ing)|switch(?:es|ed|ing)|modif(?:y|ies|ied|ying))\s+(?:(?:the|its|their)\s+)?(?:default|behavior|behaviour|approach|strategy|architecture|policy)\b/i.test(text);
   if (changesDecision) for (const number of findMentions(text)) references.add(number);
