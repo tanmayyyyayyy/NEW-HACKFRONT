@@ -21,6 +21,7 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "ai": "^7.0.179",
     "better-auth": "^1.7.27",
+    "motion": "^14.14.0",
     "neo4j-driver": "^6.3.2",
     "next": "^16.4.6",
     "react": "^19.3.1",

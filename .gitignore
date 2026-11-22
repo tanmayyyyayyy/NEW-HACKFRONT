@@ -6,3 +6,6 @@ next-env.d.ts
 
 .local/
 .env
+demo_video/seg_*.mp4
+demo_video/*.aiff
+demo_video/*.wav
