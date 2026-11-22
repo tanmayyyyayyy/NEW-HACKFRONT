@@ -26,14 +26,14 @@ export type ReviewFinding = {
   rationale: string;
   comment: string;
   proposedEvidence: string;
-  older: { number: number; title: string; author: string; date: string; url: string; evidence: string };
-  reversal: { number: number; title: string; author: string; date: string; url: string; evidence: string };
+  older: { number: number; title: string; author: string; createdAt: string; mergedAt: string | null; date: string; url: string; evidence: string };
+  reversal: { number: number; title: string; author: string; createdAt: string; mergedAt: string | null; date: string; url: string; evidence: string };
 };
 export type AIReview = {
   status: "ready" | "not-configured" | "unavailable" | "not-requested";
   recommendation: "resolve-before-merge" | "review" | "no-conflict-found" | "not-run";
   summary: string | null;
-  evidence: { id: string; title: string; author: string; date: string; url: string }[];
+  evidence: { id: string; title: string; author: string; createdAt: string; mergedAt: string | null; date: string; url: string }[];
   criteria: { name: string; status: "conflict" | "check" | "clear" | "unknown"; detail: string; sources: string[] }[];
   findings: { path: string; severity: "conflict" | "possible-conflict" | "review-note"; sources: string[]; evidence: string; explanation: string; comment: string }[];
 };
@@ -158,7 +158,7 @@ async function remoteReversalsForFixture(pulls: Pull[], target: Pull): Promise<R
   return result;
 }
 
-type HistoricalSource = { id: string; title: string; author: string; date: string; url: string; body: string; files: { path: string; patch: string }[] };
+type HistoricalSource = { id: string; title: string; author: string; createdAt: string; mergedAt: string | null; date: string; url: string; body: string; files: { path: string; patch: string }[] };
 
 async function collectHistoricalSources(repo: string, target: Pull, proposedFiles: ChangedFile[], mode: "public" | "private", token?: string): Promise<HistoricalSource[]> {
   const paths = new Set(proposedFiles.map(file => file.filename));
@@ -191,7 +191,8 @@ async function collectHistoricalSources(repo: string, target: Pull, proposedFile
       if (!overlap.length) continue;
       records.push({
         id: `PR #${pull.number}`, title: pull.title, author: pull.user?.login || "Unknown author",
-        date: mergedDate(pull) || pull.created_at, url: url(repo, pull), body: (pull.body || "").slice(0, 1200),
+        date: mergedDate(pull) || pull.created_at, createdAt: pull.created_at, mergedAt: mergedDate(pull),
+        url: url(repo, pull), body: (pull.body || "").slice(0, 1200),
         files: overlap.map(file => ({ path: file.filename, patch: (file.patch || "").slice(0, 800) })),
       });
       if (records.length >= 10) break;
@@ -209,7 +210,7 @@ async function analyzeWithAI(target: Pull, proposedFiles: ChangedFile[], history
   const sources = [
     ...proposedFiles.slice(0, 18).map(file => ({ id: `${targetId}:${file.filename}`, path: file.filename, title: target.title,
       body: targetBody, patch: (file.patch || "").slice(0, 1200), addedSettings: file.addedSettings, removedSettings: file.removedSettings })),
-    ...history.map(source => ({ id: source.id, title: source.title, author: source.author, date: source.date,
+    ...history.map(source => ({ id: source.id, title: source.title, author: source.author, createdAt: source.createdAt, mergedAt: source.mergedAt, date: source.date,
       body: source.body, changedFiles: source.files })),
   ];
   const sourceIds = new Set(sources.map(source => source.id));
@@ -246,7 +247,7 @@ async function analyzeWithAI(target: Pull, proposedFiles: ChangedFile[], history
       : findings.length || criteria.some(item => item.status === "check" || item.status === "unknown") ? "review"
       : "no-conflict-found";
     return { status: "ready", recommendation, summary: reviewed.summary,
-      evidence: history.map(({ id, title, author, date, url }) => ({ id, title, author, date, url })), criteria, findings };
+      evidence: history.map(({ id, title, author, createdAt, mergedAt, date, url }) => ({ id, title, author, createdAt, mergedAt, date, url })), criteria, findings };
   } catch { return empty("unavailable"); }
 }
 
@@ -276,7 +277,8 @@ export async function reviewPullRequest(repo: string, number: number, mode: "pub
   if (!proposedFiles.length) throw new RepositoryError("GitHub did not return any changed files for this pull request.", 404);
   const historicalSources = await collectHistoricalSources(repo, target, proposedFiles, mode, token);
   const response = {
-    pull: { number: target.number, title: target.title, author: target.user?.login || "Unknown author", date: mergedDate(target) || target.created_at,
+    pull: { number: target.number, title: target.title, author: target.user?.login || "Unknown author", createdAt: target.created_at,
+      mergedAt: mergedDate(target), date: mergedDate(target) || target.created_at,
       url: url(repo, target), state: mergedDate(target) ? "merged" : target.state || "open" },
     findings: [] as ReviewFinding[],
     coverage: { changedFiles: proposedFiles.length, historicalReversals: reversals.length, historyWindow: mode === "public" && repo === "appfuton/futon" ? "Bundled repository history" : "Up to 40 recently updated merged pull requests" },
@@ -320,8 +322,10 @@ export async function reviewPullRequest(repo: string, number: number, mode: "pub
         comment: exact ? `Possible reintroduction of behavior from PR #${reversal.older.number}, which PR #${reversal.newer.number} later replaced. ${commentBase}`
           : `Historical decision context: PR #${reversal.older.number} was later changed by PR #${reversal.newer.number} in this file. ${commentBase}`,
         proposedEvidence: proposedAdds.slice(0, 500) || (reversal.key ? `Setting: ${reversal.key}` : "The proposed pull request changes this file; GitHub did not provide a patch excerpt."),
-        older: { number: reversal.older.number, title: reversal.older.title, author: reversal.older.user?.login || "Unknown author", date: olderDate, url: url(repo, reversal.older), evidence: cleanEvidence(reversal.older) },
-        reversal: { number: reversal.newer.number, title: reversal.newer.title, author: reversal.newer.user?.login || "Unknown author", date: newerDate, url: url(repo, reversal.newer), evidence: cleanEvidence(reversal.newer) },
+        older: { number: reversal.older.number, title: reversal.older.title, author: reversal.older.user?.login || "Unknown author",
+          createdAt: reversal.older.created_at, mergedAt: olderDate, date: olderDate, url: url(repo, reversal.older), evidence: cleanEvidence(reversal.older) },
+        reversal: { number: reversal.newer.number, title: reversal.newer.title, author: reversal.newer.user?.login || "Unknown author",
+          createdAt: reversal.newer.created_at, mergedAt: newerDate, date: newerDate, url: url(repo, reversal.newer), evidence: cleanEvidence(reversal.newer) },
       };
       const prior = uniqueFindings.get(key);
       if (!prior || finding.confidence === "changed-lines") uniqueFindings.set(key, finding);

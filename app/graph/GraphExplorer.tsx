@@ -50,7 +50,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const [useAiReview, setUseAiReview] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState("");
-  const [reviewResult, setReviewResult] = useState<{ pull: { number: number; title: string; author: string; date: string; url: string; state: string }; findings: ReviewFinding[]; coverage: { changedFiles: number; historicalReversals: number; historyWindow: string }; aiReview: AIReview }>();
+  const [reviewResult, setReviewResult] = useState<{ pull: { number: number; title: string; author: string; createdAt: string; mergedAt: string | null; date: string; url: string; state: string }; findings: ReviewFinding[]; coverage: { changedFiles: number; historicalReversals: number; historyWindow: string }; aiReview: AIReview }>();
 
   const { nodes, edges, byId } = useMemo(() => {
     if (view === "risk") {
@@ -284,7 +284,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
             {reviewError && <p role="status" className="review-status">{reviewError}</p>}
             {reviewResult && <>
               <div className="review-result-heading"><div><small>REVIEWED PR #{reviewResult.pull.number}</small><h4><a href={reviewResult.pull.url} target="_blank" rel="noreferrer">{reviewResult.pull.title} ↗</a></h4>
-                <p>@{reviewResult.pull.author} · {dateLabel(reviewResult.pull.date)} · {reviewResult.pull.state}</p></div>
+                <p>@{reviewResult.pull.author} · Created {dateLabel(reviewResult.pull.createdAt)}{reviewResult.pull.mergedAt ? ` · Merged ${dateLabel(reviewResult.pull.mergedAt)}` : ""} · {reviewResult.pull.state}</p></div>
                 <span>{reviewResult.findings.length + reviewResult.aiReview.findings.length} findings</span></div>
               <p className="review-coverage">Compared {reviewResult.coverage.changedFiles} changed files against {reviewResult.coverage.historicalReversals} explicitly linked reversals and {reviewResult.coverage.historyWindow.toLowerCase()}.</p>
               {reviewResult.aiReview.status === "ready" && <section className="review-ai-results" aria-label="AI review criteria">
@@ -303,7 +303,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
                     <div className="review-finding-top"><span>{finding.severity === "conflict" ? "DECISION CONFLICT" : finding.severity === "possible-conflict" ? "POSSIBLE CONFLICT" : "REVIEW NOTE"}</span><code>{finding.path}</code></div>
                     <p>{finding.explanation}</p><blockquote>{finding.evidence}</blockquote>
                     <div className="review-comment"><small>SUGGESTED REVIEW COMMENT</small><p>{finding.comment}</p><button type="button" onClick={() => void copyReviewComment(finding.comment)}>Copy comment draft</button></div>
-                    <p className="review-source-links">Evidence: {cited.map(source => <a key={source.id} href={source.url} target="_blank" rel="noreferrer">{source.id} · @{source.author} · {dateLabel(source.date)} ↗</a>)}</p>
+                    <p className="review-source-links">Evidence: {cited.map(source => <a key={source.id} href={source.url} target="_blank" rel="noreferrer">{source.id} · @{source.author} · Created {dateLabel(source.createdAt)}{source.mergedAt ? ` · Merged ${dateLabel(source.mergedAt)}` : ""} ↗</a>)}</p>
                   </article>;
                 })}
               </section>}
@@ -313,8 +313,8 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
               {reviewResult.findings.length ? <div className="review-findings">{reviewResult.findings.map((finding, index) => <article className={`review-finding ${finding.confidence === "changed-lines" ? "review-strong" : "review-context"}`} key={`${finding.path}:${finding.older.number}:${finding.reversal.number}:${index}`}>
                 <div className="review-finding-top"><span>{finding.confidence === "changed-lines" ? "POSSIBLE REINTRODUCTION" : "HISTORICAL CONTEXT"}</span><code>{finding.path}</code></div>
                 <p>{finding.rationale}</p>
-                <div className="review-history-pair"><div><small>EARLIER DECISION · {dateLabel(finding.older.date)} · @{finding.older.author}</small><a href={finding.older.url} target="_blank" rel="noreferrer">PR #{finding.older.number}: {finding.older.title}</a><blockquote>{finding.older.evidence}</blockquote></div>
-                  <div><small>LATER REVERSAL · {dateLabel(finding.reversal.date)} · @{finding.reversal.author}</small><a href={finding.reversal.url} target="_blank" rel="noreferrer">PR #{finding.reversal.number}: {finding.reversal.title}</a><blockquote>{finding.reversal.evidence}</blockquote></div></div>
+                <div className="review-history-pair"><div><small>EARLIER DECISION · @{finding.older.author} · Created {dateLabel(finding.older.createdAt)}{finding.older.mergedAt ? ` · Merged ${dateLabel(finding.older.mergedAt)}` : ""}</small><a href={finding.older.url} target="_blank" rel="noreferrer">PR #{finding.older.number}: {finding.older.title}</a><blockquote>{finding.older.evidence}</blockquote></div>
+                  <div><small>LATER REVERSAL · @{finding.reversal.author} · Created {dateLabel(finding.reversal.createdAt)}{finding.reversal.mergedAt ? ` · Merged ${dateLabel(finding.reversal.mergedAt)}` : ""}</small><a href={finding.reversal.url} target="_blank" rel="noreferrer">PR #{finding.reversal.number}: {finding.reversal.title}</a><blockquote>{finding.reversal.evidence}</blockquote></div></div>
                 <details><summary>Proposed change evidence</summary><pre>{finding.proposedEvidence}</pre></details>
                 <div className="review-comment"><small>SUGGESTED REVIEW COMMENT</small><p>{finding.comment}</p><button type="button" onClick={() => void copyReviewComment(finding.comment)}>Copy comment draft</button></div>
                 <a className="review-diff-link" href={reviewResult.pull.url + "/files"} target="_blank" rel="noreferrer">Open changed files on GitHub ↗</a>
