@@ -332,6 +332,10 @@ details > summary { cursor: pointer; }
 .review-result-heading p { margin: 0; color: var(--muted); font-size: .8rem; }
 .review-result-heading > span { flex: none; padding: 5px 9px; border: 1px solid #ffab8050; border-radius: 999px; color: var(--accent); font-size: .78rem; }
 .review-ai-results { display: grid; gap: 12px; padding: 14px; border: 1px solid #52433e; border-radius: 10px; background: linear-gradient(135deg,#252026,#18181e); }
+.review-verdict { padding: 10px 12px; border: 1px solid #5d5343; border-radius: 8px; color: #f1d49d; background: #a17b2014; font-size: .84rem; font-weight: 720; }
+.verdict-resolve-before-merge { border-color: #9b4d42; color: #ffc1ae; background: #a33b321b; }
+.verdict-review { border-color: #826444; color: #ffd79c; background: #8c6b271b; }
+.verdict-no-conflict-found { border-color: #426d62; color: #b1e2d1; background: #3e79631b; }
 .review-ai-results > div:first-child > p { margin: 5px 0 0; color: #e8dfda; }
 .review-criteria { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,190px),1fr)); gap: 8px; }
 .review-criteria article { display: grid; align-content: start; gap: 5px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #121218a8; }

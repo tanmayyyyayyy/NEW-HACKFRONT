@@ -288,6 +288,9 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
                 <span>{reviewResult.findings.length + reviewResult.aiReview.findings.length} findings</span></div>
               <p className="review-coverage">Compared {reviewResult.coverage.changedFiles} changed files against {reviewResult.coverage.historicalReversals} explicitly linked reversals and {reviewResult.coverage.historyWindow.toLowerCase()}.</p>
               {reviewResult.aiReview.status === "ready" && <section className="review-ai-results" aria-label="AI review criteria">
+                <div className={`review-verdict verdict-${reviewResult.aiReview.recommendation}`}>
+                  {reviewResult.aiReview.recommendation === "resolve-before-merge" ? "Direct decision conflict · resolve before merge" : reviewResult.aiReview.recommendation === "review" ? "Historical signal · reviewer follow-up recommended" : "No direct conflict found in the matched history"}
+                </div>
                 <div><small>AI REVIEW</small><p>{reviewResult.aiReview.summary}</p></div>
                 <div className="review-criteria">{reviewResult.aiReview.criteria.map(item => <article key={item.name}>
                   <span className={`review-criterion-status criterion-${item.status}`}>{item.status === "conflict" ? "Conflict" : item.status === "check" ? "Check" : item.status === "clear" ? "Clear" : "Unknown"}</span>
@@ -306,6 +309,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
               </section>}
               {reviewResult.aiReview.status === "not-configured" && <p className="review-coverage">AI review was selected, but no Gemini service is configured. Historical file checks are still shown below.</p>}
               {reviewResult.aiReview.status === "unavailable" && <p className="review-coverage">AI review could not complete. Historical file checks are still shown below.</p>}
+              {reviewResult.aiReview.status !== "ready" && reviewResult.findings.some(finding => finding.confidence === "changed-lines") && <div className="review-verdict verdict-review">Possible reintroduction found in changed lines · resolve the history check before merge.</div>}
               {reviewResult.findings.length ? <div className="review-findings">{reviewResult.findings.map((finding, index) => <article className={`review-finding ${finding.confidence === "changed-lines" ? "review-strong" : "review-context"}`} key={`${finding.path}:${finding.older.number}:${finding.reversal.number}:${index}`}>
                 <div className="review-finding-top"><span>{finding.confidence === "changed-lines" ? "POSSIBLE REINTRODUCTION" : "HISTORICAL CONTEXT"}</span><code>{finding.path}</code></div>
                 <p>{finding.rationale}</p>
