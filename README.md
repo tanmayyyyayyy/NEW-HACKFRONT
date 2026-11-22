@@ -113,7 +113,7 @@ The workspace sidebar uses the same repository for **Chat**, **Open pull request
 
 GitHub history can establish what someone wrote, which files changed and when two recorded decisions conflict. A PR author may differ from the person who chose the design. An undocumented conversation or a loosely worded reversal may leave no detectable relationship. A date cutoff includes a sampled PR from its opening date and marks it merged once its merge date falls within the cutoff. Descriptions and changed-file lists still reflect the retrieved version. Use explicit PR numbers, code identifiers or English search terms for the most reliable retrieval. Multilingual generation applies to the explanation.
 
-## Local MCP server
+## Connect a coding agent
 
 Open [Connect a coding agent](http://localhost:3000/connect) and copy the setup prompt into a local coding agent with stdio MCP support. If the agent is working in a different project, include the SkillForge checkout path using the optional settings on that page. Run `npm run check:mcp` while the app is running to discover the tools and test Futon PR #146.
 
@@ -123,7 +123,9 @@ For manual setup, start SkillForge with `npm start` and register a **stdio** ser
 ["--import", "file:///C:/path/to/NEW-HACKFRONT/node_modules/tsx/dist/loader.mjs", "C:/path/to/NEW-HACKFRONT/scripts/mcp.ts"]
 ```
 
-The MCP server uses `http://localhost:3000` by default. Set `SKILLFORGE_URL` in the MCP client if you run SkillForge on a different local port. It exposes `ask_repository`, `review_pull_request`, `list_open_pull_requests` and `repository_graph` for public GitHub data. Graph requests may save a local index. GitHub credentials stay in the running web app.
+The stdio bridge runs in the agent environment and connects to the web app. Set `SKILLFORGE_URL` to `https://skillforge-repository-desk.onrender.com` to use the Render deployment without starting a local web server. The hosted setup page fills its own origin in the copyable prompt. For local use the default is `http://localhost:3000`. Use the same origin with `npm run check:mcp`.
+
+The bridge exposes `ask_repository`, `review_pull_request`, `list_open_pull_requests` and `repository_graph` for public GitHub data. Graph requests may save an index. GitHub credentials stay in the web app.
 
 ## Query API
 

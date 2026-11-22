@@ -9,6 +9,17 @@ import { driver } from "../lib/neo4j";
 import { pullSnippet, repositorySnippets } from "../lib/code-evidence";
 import { requestGithub } from "../lib/repository-chat";
 import { sourceFromMessage } from "../lib/code-types";
+import { mcpOrigin } from "../lib/mcp-origin";
+
+test("MCP accepts hosted HTTPS and local HTTP origins", () => {
+  assert.equal(mcpOrigin("https://skillforge-repository-desk.onrender.com/"), "https://skillforge-repository-desk.onrender.com");
+  assert.equal(mcpOrigin("http://localhost:3000"), "http://localhost:3000");
+  assert.equal(mcpOrigin("http://[::1]:3000"), "http://[::1]:3000");
+  for (const url of ["http://skillforge.example", "https://skillforge.example/api", "https://user@skillforge.example",
+    "https://skillforge.example/?token=x", "https://skillforge.example/#fragment", "file:///server"]) {
+    assert.equal(mcpOrigin(url), undefined);
+  }
+});
 import { POST as graph } from "../app/api/graph/route";
 
 test("open pull requests use GitHub's open filter and validate access before listing", async t => {
