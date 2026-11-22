@@ -206,9 +206,9 @@ details > summary { cursor: pointer; }
 .graph-example { justify-self: start; }
 .graph-notice { margin-block: 14px; color: var(--muted); }
 .graph-progress { padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; }
-.graph-workbench { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
+.graph-workbench { border: 1px solid #464550; border-radius: 12px; overflow: hidden; background: linear-gradient(145deg,#1d1c24,#17171d 60%,#191a22); box-shadow: 0 20px 55px #00000027,inset 0 1px #ffffff09; }
 .graph-bar,.graph-tools,.graph-inspector { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 15px; }
-.graph-bar,.graph-tools { border-bottom: 1px solid var(--line); }
+.graph-bar,.graph-tools { border-bottom: 1px solid var(--line); background: linear-gradient(90deg,#ffffff04,transparent 58%,#ffab8005); }
 .graph-bar code,.graph-inspector small { color: var(--muted); }
 .graph-bar code { margin-left: 6px; }
 .graph-bar .workspace-modes { flex-wrap: wrap; }

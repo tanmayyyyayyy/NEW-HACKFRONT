@@ -50,7 +50,7 @@ export const collections: Trace[] = [
   {
     slug: "checks-workflow",
     name: "When did the original CI workflow disappear?",
-    repo: "tanmayyyyayyy/NEW-HACKFRONT",
+    repo: "tanmayyyyayyy/SkillForge-AI",
     type: "Change with an unknown reason",
     steps: [
       {

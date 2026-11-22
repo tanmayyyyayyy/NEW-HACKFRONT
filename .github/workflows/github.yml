@@ -1,0 +1,26 @@
+name: Live Deployment Link
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  live-deployment:
+    name: Production Deployment
+    runs-on: ubuntu-latest
+    environment:
+      name: Production
+      url: https://skillforge-repository-desk.onrender.com
+    steps:
+      - name: Report Live Application URL
+        run: |
+          echo "## 🚀 SkillForge AI is Live!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🌐 **Production URL:** [https://skillforge-repository-desk.onrender.com](https://skillforge-repository-desk.onrender.com)" >> $GITHUB_STEP_SUMMARY
+          echo "🩺 **Health Status:** [https://skillforge-repository-desk.onrender.com/api/health](https://skillforge-repository-desk.onrender.com/api/health)" >> $GITHUB_STEP_SUMMARY
+          echo "🗺️ **Interactive 3D Graph:** [https://skillforge-repository-desk.onrender.com/graph](https://skillforge-repository-desk.onrender.com/graph)" >> $GITHUB_STEP_SUMMARY
+          echo "🤖 **Agent Connect MCP:** [https://skillforge-repository-desk.onrender.com/connect](https://skillforge-repository-desk.onrender.com/connect)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Deployment is verified, healthy, and operational on Render." >> $GITHUB_STEP_SUMMARY

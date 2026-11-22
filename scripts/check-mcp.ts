@@ -16,7 +16,7 @@ try {
     stderr: "inherit",
   }));
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map(tool => tool.name).sort(),
+  assert.deepEqual(tools.map((tool: { name: string }) => tool.name).sort(),
     ["ask_repository", "list_open_pull_requests", "repository_graph", "review_pull_request"]);
   const result = await client.callTool({ name: "review_pull_request",
     arguments: { pullUrl: "https://github.com/AppFuton/Futon/pull/146" } });

@@ -1,4 +1,11 @@
-# SkillForge
+# SkillForge AI
+
+[![Live Application](https://img.shields.io/badge/Live%20Demo-skillforge--repository--desk.onrender.com-success?style=for-the-badge&logo=render)](https://skillforge-repository-desk.onrender.com)
+[![GitHub Workflow](https://img.shields.io/github/actions/workflow/status/tanmayyyyayyy/SkillForge-AI/checks.yml?branch=main&label=CI%20Checks&style=for-the-badge)](https://github.com/tanmayyyyayyy/SkillForge-AI/actions)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/tanmayyyyayyy/SkillForge-AI)
+
+> 🚀 **Live Production Application**: [https://skillforge-repository-desk.onrender.com](https://skillforge-repository-desk.onrender.com)  
+> 🩺 **Health Endpoint**: [https://skillforge-repository-desk.onrender.com/api/health](https://skillforge-repository-desk.onrender.com/api/health)
 
 **Understand why a codebase changed, even after the engineer who made the change has moved on.**
 
@@ -8,7 +15,7 @@ A new maintainer opens Futon and finds that the reader waits for chapter updates
 
 ## Repository graph
 
-Open **Graph** and index a GitHub repository URL or a local folder. SkillForge stores each index in Neo4j and shows six ways to explore it in an interactive 3D graph:
+Open **Graph** and index a GitHub repository URL or a local folder. SkillForge stores each index in Neo4j and shows six ways to explore it in a switchable 2D and 3D graph. The focused 2D relationship diagram opens by default; choose **3D** for a spatial view or **Full map** for the complete overview.
 
 - **File structure** shows folders, their parent, and their contents.
 - **Module imports** shows statically detected imports between JavaScript and TypeScript files and external packages. It samples up to 18 source files and recognizes relative imports and conventional `@/` paths. Runtime calls and custom compiler aliases can be missing.
@@ -17,7 +24,7 @@ Open **Graph** and index a GitHub repository URL or a local folder. SkillForge s
 - **Knowledge risk map** groups source files into modules and surfaces sparse rationale documentation, contributor concentration, and missing links between sampled pull requests. GitHub ownership signals come from up to 12 recent PR file lists; local folders can show documentation gaps but do not include historical contributors or decisions. Risk signals are a triage aid based on the sampled index, not a code quality or personnel assessment.
 - **PR reviewer** accepts a GitHub pull request link, compares its changed files with earlier merged PRs on those files, and surfaces possible conflicts with cited decisions and draft review comments. Optional AI review checks decision alignment, known reversals, regression risk, and test rationale. It only states a direct conflict when the cited source supports it; matching a file alone is shown as historical context. No comments are posted to GitHub.
 
-Drag the 3D graph to orbit and use the on-canvas controls or arrow keys to rotate and zoom. The node list remains available for keyboard selection and when WebGL is unavailable.
+The 2D and 3D modes keep the selected node and surrounding features in place. The 2D view shows a focused set of relationships with zoom controls; drag the 3D graph to orbit and use the on-canvas controls or arrow keys to rotate and zoom. The node list remains available for keyboard selection and when WebGL is unavailable.
 
 Choose a node and switch between the **2D** relationship diagram and the orbitable **3D** view. Both keep the current selection. GitHub nodes link to their source. Choose **Open in chat** to carry the repository into the workspace. Private repositories require sign-in and a scoped read token. Local folder indexing also requires sign-in. It sends file paths and detected imports, skips common build folders and environment files, and leaves GitHub history to the GitHub importer. On public deployments, set `APP_ORIGIN` to the public HTTPS origin so robots and sitemap metadata point to the correct host.
 
@@ -28,8 +35,8 @@ The optional AI reviewer uses the configured Gemini service when **Use AI** is c
 Use Node.js 24, npm and a running Neo4j instance. Docker is convenient for the local database. Run the following in a POSIX shell on a fresh checkout.
 
 ```sh
-git clone https://github.com/tanmayyyyayyy/NEW-HACKFRONT.git
-cd NEW-HACKFRONT
+git clone https://github.com/tanmayyyyayyy/SkillForge-AI.git
+cd SkillForge-AI
 npm ci
 cp .env.example .env.local
 ```
@@ -120,7 +127,7 @@ Open [Connect a coding agent](http://localhost:3000/connect) and copy the setup 
 For manual setup, start SkillForge with `npm start` and register a **stdio** server named `skillforge`. Use `node` as the command and the following arguments, substituting the absolute paths for your checkout.
 
 ```json
-["--import", "file:///C:/path/to/NEW-HACKFRONT/node_modules/tsx/dist/loader.mjs", "C:/path/to/NEW-HACKFRONT/scripts/mcp.ts"]
+["--import", "file:///C:/path/to/SkillForge-AI/node_modules/tsx/dist/loader.mjs", "C:/path/to/SkillForge-AI/scripts/mcp.ts"]
 ```
 
 The stdio bridge runs in the agent environment and connects to the web app. Set `SKILLFORGE_URL` to `https://skillforge-repository-desk.onrender.com` to use the Render deployment without starting a local web server. The hosted setup page fills its own origin in the copyable prompt. For local use the default is `http://localhost:3000`. Use the same origin with `npm run check:mcp`.
@@ -204,9 +211,11 @@ Live OAuth callbacks, real email delivery, organization token approval and Sarva
 
 ## Deploying on Render
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/tanmayyyyayyy/SkillForge-AI)
+
 The root Blueprint provisions a **free web service**. The Docker image runs Next.js as the `node` user and stores accounts in `.local/accounts.sqlite`. Render can discard that file on redeploy or restart. For durable accounts, use a plan with a persistent disk and set `ACCOUNT_DATABASE` to a path on that disk. [Render Blueprint](render.yaml) · [Dockerfile](Dockerfile)
 
-1. Connect this repository as a Blueprint and select the root `render.yaml`.
+1. Click the **Deploy to Render** button above or connect this repository (`tanmayyyyayyy/SkillForge-AI`) as a Blueprint in Render and select `render.yaml`.
 2. Set the exact HTTPS origin and Neo4j credentials. Render generates the account secret. Keep it stable across deployments.
 3. Add the optional provider keys you intend to use and register OAuth callbacks against the deployed origin. Set `GITHUB_PUBLIC_READ_TOKEN` in the web service environment to raise the limit for live public history.
 4. Open `/api/health` and check that `neo4j` is `connected`. The endpoint can report the service ready while the database is disconnected. Then run the three public demo questions, a private sign-in and a revoked-access check. A healthy graph alone does not verify login, mail or AI delivery.
