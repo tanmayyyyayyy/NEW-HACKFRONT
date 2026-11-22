@@ -3,12 +3,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { chatSource, pullTarget } from "../lib/code-types";
 import type { RepositoryGraph } from "../lib/graph-types";
+import { mcpOrigin } from "../lib/mcp-origin";
 
-const app = new URL(process.env.SKILLFORGE_URL || "http://localhost:3000");
-if (!["http:", "https:"].includes(app.protocol) || !["localhost", "127.0.0.1", "[::1]"].includes(app.hostname) ||
-  app.username || app.password || app.pathname !== "/" || app.search || app.hash) {
-  throw new Error("SKILLFORGE_URL must be a local SkillForge origin, such as http://localhost:3000.");
-}
+const origin = mcpOrigin(process.env.SKILLFORGE_URL || "http://localhost:3000");
+if (!origin) throw new Error("SKILLFORGE_URL must be an HTTPS deployment origin or a local origin such as http://localhost:3000.");
+const app = new URL(origin);
 
 const server = new McpServer({ name: "skillforge", version: "1.0.0" });
 const annotations = { readOnlyHint: true, openWorldHint: true };
@@ -16,13 +15,14 @@ const repoInput = z.string().max(400).refine(value => Boolean(chatSource(value) 
 const pullInput = z.string().max(400).refine(value => Boolean(pullTarget(value)), "Enter a GitHub pull request URL.");
 
 async function post(path: string, body?: object) {
-  const response = await fetch(new URL(path, app.origin), {
+  const response = await fetch(new URL(path, app), {
     method: "POST", redirect: "error", signal: AbortSignal.timeout(55_000),
     headers: { Origin: app.origin, ...(body && { "Content-Type": "application/json" }) },
     body: body && JSON.stringify(body),
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "SkillForge returned HTTP " + response.status);
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(typeof data?.error === "string" ? data.error : "SkillForge returned HTTP " + response.status);
+  if (!data) throw new Error("SkillForge returned an unexpected response. Check SKILLFORGE_URL.");
   return data;
 }
 
@@ -35,7 +35,7 @@ async function result(work: () => Promise<unknown>) {
     return { content: [{ type: "text" as const, text: JSON.stringify(await work()) }] };
   } catch (failure) {
     const message = failure instanceof Error && failure.message !== "fetch failed"
-      ? failure.message : "Start SkillForge with npm start and check SKILLFORGE_URL.";
+      ? failure.message : "Could not reach SkillForge. Check that SKILLFORGE_URL is reachable from this agent.";
     return { isError: true, content: [{ type: "text" as const, text: message }] };
   }
 }
