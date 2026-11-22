@@ -2,19 +2,23 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import type { GraphEdge, GraphNode, RepositoryGraph } from "../../lib/graph-types";
+import type { AIReview, ReviewFinding } from "../../lib/pr-review";
 import { importSpecifiers, sourceFileLimit, sourceFilePattern, treeEntryLimit } from "../../lib/graph-model";
 import { SpatialGraph } from "./SpatialGraph";
+import { RepositoryGraph3D } from "./RepositoryGraph3D";
 
-type View = "files" | "imports" | "history" | "conflicts";
+type View = "files" | "imports" | "history" | "conflicts" | "risk" | "review";
 const views: { id: View; label: string; empty: string }[] = [
   { id: "files", label: "File structure", empty: "No files or folders available." },
   { id: "imports", label: "Module imports", empty: "No static JavaScript or TypeScript imports were found in the scanned files." },
   { id: "history", label: "Decision history", empty: "No pull requests or commits were found in the indexed history." },
   { id: "conflicts", label: "Decision conflicts", empty: "No linked decision updates were found in the indexed pull request history." },
+  { id: "risk", label: "Knowledge risk map", empty: "No source modules were available to map." },
+  { id: "review", label: "PR reviewer", empty: "Review a pull request against recorded decisions." },
 ];
 const labels: Record<GraphEdge["kind"], string> = {
   CONTAINS: "Contains", IMPORTS: "Imports", PARENT: "Parent commit", INCLUDES: "Includes commit",
-  REFERENCES: "References", SUPERSEDES: "Supersedes",
+  COVERS: "Covers", REFERENCES: "References", SUPERSEDES: "Supersedes",
 };
 const perLane = 7;
 const ignoredFolders = new Set([".git", "node_modules", ".next", "dist", "build", "coverage"]);
@@ -23,6 +27,7 @@ function belongs(edge: GraphEdge, view: View) {
   if (view === "files") return edge.kind === "CONTAINS";
   if (view === "imports") return edge.kind === "IMPORTS";
   if (view === "conflicts") return edge.kind === "SUPERSEDES";
+  if (view === "risk") return edge.kind === "COVERS";
   return edge.kind !== "CONTAINS" && edge.kind !== "IMPORTS";
 }
 
@@ -46,12 +51,28 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const [focus, setFocus] = useState("");
   const [search, setSearch] = useState("");
   const [zoom, setZoom] = useState(100);
-  const [dimension, setDimension] = useState<"2D" | "3D">("2D");
+  const [dimension, setDimension] = useState<"2D" | "3D" | "Full map">("Full map");
   const [page, setPage] = useState(0);
   const [nodeLimit, setNodeLimit] = useState(36);
   const [overridesOnly, setOverridesOnly] = useState(false);
+  const [reviewUrl, setReviewUrl] = useState("");
+  const [useAiReview, setUseAiReview] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  const [reviewResult, setReviewResult] = useState<{ pull: { number: number; title: string; author: string; createdAt: string; mergedAt: string | null; date: string; url: string; state: string }; findings: ReviewFinding[]; coverage: { changedFiles: number; historicalReversals: number; historyWindow: string }; aiReview: AIReview }>();
 
   const { nodes, edges, byId } = useMemo(() => {
+    if (view === "risk") {
+      const areas = graph?.riskAreas ?? [];
+      const folders = new Map(graph?.nodes.filter(node => node.kind === "folder").map(node => [node.detail.replace(/\/$/, ""), node]) ?? []);
+      const riskNodes: GraphNode[] = areas.map(area => ({ id: "risk:" + area.id, label: area.name,
+        detail: area.path + " · " + area.signals.length + " risk signals", kind: "risk", risk: area }));
+      const riskEdges: GraphEdge[] = areas.flatMap(area => folders.has(area.path)
+        ? [{ from: "risk:" + area.id, to: folders.get(area.path)!.id, kind: "COVERS" as const }] : []);
+      const linkedFolders = new Set(riskEdges.map(edge => edge.to));
+      const visibleNodes = [...riskNodes, ...(graph?.nodes.filter(node => linkedFolders.has(node.id)) ?? [])];
+      return { nodes: visibleNodes, edges: riskEdges, byId: new Map(visibleNodes.map(node => [node.id, node])) };
+    }
     const edges = graph?.edges.filter(edge => belongs(edge, view) && (!overridesOnly || view !== "history" || edge.kind === "SUPERSEDES")) ?? [];
     const ids = new Set(edges.flatMap(({ from, to }) => [from, to]));
     const nodes = graph?.nodes.filter(node => {
@@ -81,11 +102,12 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const middle = height / 2;
   const rowY = (index: number, count: number) => middle + (index - (count - 1) / 2) * 72;
   const selectedView = views.find(item => item.id === view)!;
+  const riskAreas = graph?.riskAreas ?? [];
+
   const headings = view === "files" ? ["Parent folder", "Contents"] : view === "imports" ? ["Imported by", "Imports"] : view === "conflicts" ? ["Newer decision", "Earlier decision"] : ["Incoming links", "Outgoing links"];
 
   function inspect(id: string) {
-    setFocus(id);
-    setPage(0);
+    setFocus(id); setPage(0);
   }
 
   function changeView(id: View) {
@@ -111,7 +133,6 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
       if (!response.ok) throw new Error(result.error || "The repository could not be indexed.");
       setGraph(result);
       changeView("files");
-      setZoom(100);
       setOverridesOnly(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The repository could not be indexed.");
@@ -146,7 +167,6 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
       if (!response.ok) throw new Error(result.error || "The folder could not be indexed.");
       setGraph(result);
       changeView("files");
-      setZoom(100);
       setOverridesOnly(false);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The folder could not be indexed.");
@@ -170,7 +190,6 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
       if (name) {
         setGraph(result);
         changeView("files");
-        setZoom(100);
         setOverridesOnly(false);
       } else {
         setSavedFolders(result.folders);
@@ -189,6 +208,31 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
     </button>;
   }
 
+  async function reviewPull(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (reviewing) return;
+    setReviewing(true); setReviewError(""); setReviewResult(undefined);
+    try {
+      const response = await fetch("/api/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(privateRepo && { Authorization: "Bearer " + token }) },
+        body: JSON.stringify({ pullUrl: reviewUrl, mode: privateRepo ? "private" : "public", aiReview: useAiReview }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "The pull request could not be reviewed.");
+      setReviewResult(result);
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : "The pull request could not be reviewed.");
+    } finally { setReviewing(false); }
+  }
+
+  async function copyReviewComment(comment: string) {
+    try {
+      await navigator.clipboard.writeText(comment);
+      setReviewError("Draft comment copied. Paste it into your GitHub review when ready.");
+    } catch { setReviewError("Clipboard access is unavailable; select the draft text to copy it."); }
+  }
+
   return <>
     <div className="workspace-modes graph-source" aria-label="Repository source">
       <button type="button" aria-pressed={source === "github"} onClick={() => changeSource("github")} disabled={busy}>GitHub repository</button>
@@ -202,7 +246,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
         {graph && <button type="submit" value="refresh" disabled={busy}>Refresh index</button>}
       </div>
       <label className="sf-check"><input type="checkbox" checked={privateRepo} disabled={busy}
-        onChange={event => { setPrivateRepo(event.target.checked); setToken(""); setGraph(undefined); setStatus(""); }} />Private repository</label>
+        onChange={event => { setPrivateRepo(event.target.checked); setUseAiReview(false); setReviewResult(undefined); setToken(""); setGraph(undefined); setStatus(""); }} />Private repository</label>
       {privateRepo && <label>Repository-scoped GitHub token
         <input type="password" value={token} autoComplete="off" required disabled={busy}
           onChange={event => { setToken(event.target.value); setGraph(undefined); }} />
@@ -223,13 +267,13 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
       </div>
     </form>}
     {status && <p role="alert" className="graph-notice sf-error">{status}</p>}
-    {busy && <p role="status" className="graph-notice graph-progress">{source === "github" ? "Reading GitHub structure and history, then storing the index in Neo4j." : "Reading the folder and storing its graph in Neo4j."}</p>}
+    {busy && <p role="status" className="graph-notice graph-progress">{source === "github" ? "Reading GitHub structure and a sample of history, then mapping documentation and ownership signals." : "Reading the folder and mapping documentation signals."}</p>}
     {graph && <section className="graph-workbench" aria-label="Indexed repository">
       <header className="graph-bar">
         <div><strong>{graph.repository}</strong> <code>{graph.revision.slice(0, 8)}</code></div>
         {graph.source !== "folder" && <a href={"/workspace?" + new URLSearchParams({ repo: graph.repository, path: privateRepo ? "private" : "public" })}>Open in chat</a>}
         <nav className="workspace-modes" aria-label="Graph view">
-          {views.map(item => <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => changeView(item.id)}>{item.label}{item.id === "conflicts" && conflictEdges.length > 0 ? ` · ${conflictEdges.length}` : ""}</button>)}
+          {views.map(item => <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => changeView(item.id)}>{item.label}{item.id === "conflicts" && conflictEdges.length > 0 ? ` · ${conflictEdges.length}` : item.id === "risk" && riskAreas.length > 0 ? ` · ${riskAreas.length}` : ""}</button>)}
         </nav>
       </header>
       <div className="graph-layout">
@@ -239,6 +283,8 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
           {view === "history" && <label className="sf-check"><input type="checkbox" checked={overridesOnly}
             onChange={event => { setOverridesOnly(event.target.checked); inspect(""); }} />Superseded decisions only</label>}
           {view === "conflicts" && <p className="conflict-hint">Later merged PRs that explicitly replace an earlier PR or describe a changed default, behavior, approach, or architecture while referencing it.</p>}
+          {view === "risk" && <p className="conflict-hint">Color and size reflect the number and severity of evidence based risk signals.</p>}
+          {view === "review" && <p className="conflict-hint">Compare a pull request with earlier decisions and known reversals. Suggested comments are drafts; nothing is posted to GitHub.</p>}
           {!lookup && imported.length > 0 && <div className="graph-highlights">
             <small>Most imported in this scan</small>
             {imported.map(item => <button key={item.id} type="button" onClick={() => inspect(item.id)}>
@@ -253,6 +299,74 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
           {matches.length > nodeLimit && <button type="button" onClick={() => setNodeLimit(limit => limit + 36)}>Show more nodes</button>}
         </aside>
         <div className="graph-stage">
+          {view === "review" && <section className="review-overview" aria-label="AI pull request reviewer with historical memory">
+            <div className="review-heading"><span className="review-spark" aria-hidden="true">✳</span><div><small>HISTORICAL MEMORY REVIEW</small><h3>Catch a decision conflict before merge</h3>
+              <p>Paste a pull request link to compare its changed files with earlier decisions, reversals, and review criteria.</p></div></div>
+            <form className="review-form" onSubmit={event => void reviewPull(event)}>
+              <label>GitHub pull request link<input type="url" value={reviewUrl} onChange={event => { setReviewUrl(event.target.value); setUseAiReview(false); setReviewResult(undefined); }} placeholder="https://github.com/owner/repository/pull/123" required /></label>
+              <button type="submit" className="sf-submit" disabled={reviewing || !reviewUrl}>{reviewing ? "Comparing changes with repository history…" : "Review pull request"}</button>
+            </form>
+            <label className="review-ai-choice"><input type="checkbox" checked={useAiReview} onChange={event => setUseAiReview(event.target.checked)} />Use AI to assess decision fit, regression risk, and test rationale</label>
+            <p className="review-scope">AI analysis is optional and uses the configured Gemini service. When enabled, the PR diff and matching history excerpts are sent to that service. Deterministic file and reversal checks run either way. Comments are drafts; nothing is posted to GitHub.</p>
+            {reviewError && <p role="status" className="review-status">{reviewError}</p>}
+            {reviewResult && <>
+              <div className="review-result-heading"><div><small>REVIEWED PR #{reviewResult.pull.number}</small><h4><a href={reviewResult.pull.url} target="_blank" rel="noreferrer">{reviewResult.pull.title} ↗</a></h4>
+                <p>@{reviewResult.pull.author} · Created {dateLabel(reviewResult.pull.createdAt)}{reviewResult.pull.mergedAt ? ` · Merged ${dateLabel(reviewResult.pull.mergedAt)}` : ""} · {reviewResult.pull.state}</p></div>
+                <span>{reviewResult.findings.length + reviewResult.aiReview.findings.length} findings</span></div>
+              <p className="review-coverage">Compared {reviewResult.coverage.changedFiles} changed files against {reviewResult.coverage.historicalReversals} explicitly linked reversals and {reviewResult.coverage.historyWindow.toLowerCase()}.</p>
+              {reviewResult.aiReview.status === "ready" && <section className="review-ai-results" aria-label="AI review criteria">
+                <div className={`review-verdict verdict-${reviewResult.aiReview.recommendation}`}>
+                  {reviewResult.aiReview.recommendation === "resolve-before-merge" ? "Direct decision conflict · resolve before merge" : reviewResult.aiReview.recommendation === "review" ? "Historical signal · reviewer follow-up recommended" : "No direct conflict found in the matched history"}
+                </div>
+                <div><small>AI REVIEW</small><p>{reviewResult.aiReview.summary}</p></div>
+                <div className="review-criteria">{reviewResult.aiReview.criteria.map(item => <article key={item.name}>
+                  <span className={`review-criterion-status criterion-${item.status}`}>{item.status === "conflict" ? "Conflict" : item.status === "check" ? "Check" : item.status === "clear" ? "Clear" : "Unknown"}</span>
+                  <strong>{item.name}</strong><p>{item.detail}</p>
+                  {item.sources.map(id => <span className="review-source-ref" key={id}>{id}</span>)}
+                </article>)}</div>
+                {reviewResult.aiReview.findings.map((finding, index) => {
+                  const cited = reviewResult.aiReview.evidence.filter(source => finding.sources.includes(source.id));
+                  return <article className="review-ai-finding" key={`${finding.path}:${index}`}>
+                    <div className="review-finding-top"><span>{finding.severity === "conflict" ? "DECISION CONFLICT" : finding.severity === "possible-conflict" ? "POSSIBLE CONFLICT" : "REVIEW NOTE"}</span><code>{finding.path}</code></div>
+                    <p>{finding.explanation}</p><blockquote>{finding.evidence}</blockquote>
+                    <div className="review-comment"><small>SUGGESTED REVIEW COMMENT</small><p>{finding.comment}</p><button type="button" onClick={() => void copyReviewComment(finding.comment)}>Copy comment draft</button></div>
+                    <p className="review-source-links">Evidence: {cited.map(source => <a key={source.id} href={source.url} target="_blank" rel="noreferrer">{source.id} · @{source.author} · Created {dateLabel(source.createdAt)}{source.mergedAt ? ` · Merged ${dateLabel(source.mergedAt)}` : ""} ↗</a>)}</p>
+                  </article>;
+                })}
+              </section>}
+              {reviewResult.aiReview.status === "not-configured" && <p className="review-coverage">AI review was selected, but no Gemini service is configured. Historical file checks are still shown below.</p>}
+              {reviewResult.aiReview.status === "unavailable" && <p className="review-coverage">AI review could not complete. Historical file checks are still shown below.</p>}
+              {reviewResult.aiReview.status !== "ready" && reviewResult.findings.some(finding => finding.confidence === "changed-lines") && <div className="review-verdict verdict-review">Possible reintroduction found in changed lines · resolve the history check before merge.</div>}
+              {reviewResult.findings.length ? <div className="review-findings">{reviewResult.findings.map((finding, index) => <article className={`review-finding ${finding.confidence === "changed-lines" ? "review-strong" : "review-context"}`} key={`${finding.path}:${finding.older.number}:${finding.reversal.number}:${index}`}>
+                <div className="review-finding-top"><span>{finding.confidence === "changed-lines" ? "POSSIBLE REINTRODUCTION" : "HISTORICAL CONTEXT"}</span><code>{finding.path}</code></div>
+                <p>{finding.rationale}</p>
+                <div className="review-history-pair"><div><small>EARLIER DECISION · @{finding.older.author} · Created {dateLabel(finding.older.createdAt)}{finding.older.mergedAt ? ` · Merged ${dateLabel(finding.older.mergedAt)}` : ""}</small><a href={finding.older.url} target="_blank" rel="noreferrer">PR #{finding.older.number}: {finding.older.title}</a><blockquote>{finding.older.evidence}</blockquote></div>
+                  <div><small>LATER REVERSAL · @{finding.reversal.author} · Created {dateLabel(finding.reversal.createdAt)}{finding.reversal.mergedAt ? ` · Merged ${dateLabel(finding.reversal.mergedAt)}` : ""}</small><a href={finding.reversal.url} target="_blank" rel="noreferrer">PR #{finding.reversal.number}: {finding.reversal.title}</a><blockquote>{finding.reversal.evidence}</blockquote></div></div>
+                <details><summary>Proposed change evidence</summary><pre>{finding.proposedEvidence}</pre></details>
+                <div className="review-comment"><small>SUGGESTED REVIEW COMMENT</small><p>{finding.comment}</p><button type="button" onClick={() => void copyReviewComment(finding.comment)}>Copy comment draft</button></div>
+                <a className="review-diff-link" href={reviewResult.pull.url + "/files"} target="_blank" rel="noreferrer">Open changed files on GitHub ↗</a>
+              </article>)}</div> : reviewResult.aiReview.findings.length === 0 && <p className="review-empty">No file-level historical reversal matched this proposal. Check the AI criteria above, if enabled; this bounded review is not an approval guarantee.</p>}
+            </>}
+          </section>}
+          {view === "risk" && <section className="risk-overview" aria-label="Institutional knowledge risk summary">
+            <div className="risk-overview-heading"><span className="risk-radar" aria-hidden="true">◎</span><div><small>INSTITUTIONAL KNOWLEDGE SCAN</small>
+              <h3>{riskAreas.length ? `${riskAreas.length} areas to review` : "No risk signals found"}</h3>
+              <p>{riskAreas.filter(area => area.signals.length > 1).length} areas have multiple risk signals in the indexed evidence.</p></div></div>
+            {graph?.source === "folder" && <p className="risk-coverage-note">This folder scan can assess documentation structure. Contributor and decision history need a GitHub index.</p>}
+            {graph?.source !== "folder" && <p className="risk-coverage-note">Contributor and decision signals use up to 12 recent pull requests. Older activity may not appear in this sample.</p>}
+            <div className="risk-cards">
+              {riskAreas.slice(0, 6).map(area => <article className="risk-card" key={area.id}>
+                <div className="risk-card-top"><strong>{area.path}</strong><span className={area.riskScore >= 0.7 ? "risk-high" : area.riskScore >= 0.35 ? "risk-medium" : "risk-watch"}>{area.riskScore >= 0.7 ? "Elevated" : area.riskScore >= 0.35 ? "Review" : "Watch"}</span></div>
+                <p>{area.sourceFiles} source files · {area.documentationFiles} docs · {area.sampledPullRequests} sampled PRs</p>
+                {area.topContributor ? <><p>{area.contributors} observed contributors · {area.decisionConnections} PRs with linked decisions</p>
+                  <p>Top contributor <b>@{area.topContributor}</b> · {Math.round(area.topContributorShare * 100)}% of sampled PRs</p></>
+                  : <p>Contributor history unavailable · {area.decisionConnections} linked decisions</p>}
+                <ul>{area.signals.map(signal => <li key={signal}>{signal}</li>)}</ul>
+                <button type="button" onClick={() => inspect("risk:" + area.id)}>Locate in 3D map <span aria-hidden="true">↗</span></button>
+              </article>)}
+            </div>
+            {riskAreas.length === 0 && <p className="graph-notice">The scan found no modules matching the current risk signals.</p>}
+          </section>}
           {view === "conflicts" && conflictEdges.length > 0 && <section className="conflict-list" aria-label="Detected decision conflicts">
             <div className="conflict-list-heading"><span className="conflict-spark" aria-hidden="true">✳</span><div><h3>Decisions that changed</h3><p>Each pair is linked by an explicit reference in the newer pull request.</p></div></div>
             {conflictEdges.map(edge => {
@@ -276,7 +390,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
           <div className="graph-tools">
             <h2>{selectedView.label}</h2>
             <div className="workspace-modes" role="group" aria-label="Graph layout">
-              {(["2D", "3D"] as const).map(layout => <button key={layout} type="button" aria-pressed={dimension === layout}
+              {(["2D", "3D", "Full map"] as const).map(layout => <button key={layout} type="button" aria-pressed={dimension === layout}
                 onClick={() => setDimension(layout)}>{layout}</button>)}
             </div>
             {dimension === "2D" && <div className="graph-zoom" aria-label="Diagram zoom">
@@ -286,7 +400,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
             </div>}
           </div>
           {selected ? <>
-            {dimension === "3D" ? <SpatialGraph selected={selected} incoming={left} outgoing={right} byId={byId} inspect={inspect} /> : <>
+            {dimension === "Full map" ? <RepositoryGraph3D nodes={nodes} edges={edges} selectedId={selected.id} onSelect={inspect} /> : dimension === "3D" ? <SpatialGraph selected={selected} incoming={left} outgoing={right} byId={byId} inspect={inspect} /> : <>
             <div className="graph-viewport" tabIndex={0} aria-label="Scrollable repository diagram">
               <div className="graph-canvas" style={{ height, minWidth: 620, width: Math.max(100, zoom) + "%", zoom: zoom < 100 ? zoom / 100 : undefined }}>
                 <div className="graph-lanes"><span>{headings[0]}</span><span>Selected node</span><span>{headings[1]}</span></div>
@@ -315,7 +429,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
             <div className="graph-inspector">
               <div><strong>{selected.detail}</strong><small>{incoming.length} incoming · {outgoing.length} outgoing</small></div>
               {selected.url && <a href={selected.url} target="_blank" rel="noreferrer">View on GitHub <span className="arrow" aria-hidden="true" /></a>}
-              {Math.max(incoming.length, outgoing.length) > perLane && <div className="graph-zoom">
+              {dimension !== "Full map" && Math.max(incoming.length, outgoing.length) > perLane && <div className="graph-zoom">
                 <button type="button" disabled={page === 0} onClick={() => setPage(value => value - 1)}>Previous links</button>
                 <button type="button" disabled={(page + 1) * perLane >= Math.max(incoming.length, outgoing.length)} onClick={() => setPage(value => value + 1)}>More links</button>
               </div>}

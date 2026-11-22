@@ -56,6 +56,7 @@ test("indexes GitHub PR decisions and commits and reuses the stored Neo4j snapsh
       { number: 4, title: "Original change", body: null, merge_commit_sha: earlier, merged_at: "2026-11-21" },
       { number: 9, title: "Changes the default", body: "See #4 for build instructions.", merge_commit_sha: null, merged_at: "2026-11-23" },
     ]);
+    if (url.pathname === prefix + "/pulls/8/files") return Response.json([{ filename: "src/index.ts" }]);
     if (url.pathname === prefix + "/pulls/8/commits") return Response.json([commit]);
     if ([prefix + "/pulls/4/commits", prefix + "/pulls/9/commits"].includes(url.pathname)) return Response.json([]);
     return new Response(null, { status: 500 });
@@ -78,6 +79,7 @@ test("indexes GitHub PR decisions and commits and reuses the stored Neo4j snapsh
   assert(indexed.edges.some(edge => edge.from === "commit:" + newest && edge.to === "commit:" + earlier && edge.kind === "PARENT"));
   assert(writes.some(query => query.includes("GRAPH_EDGE")));
   assert.equal(indexed.coverage.importFiles, 1);
+  assert.equal(indexed.riskAreas?.find(area => area.path === "src/index.ts")?.decisionConnections, 1);
   const previousCalls = calls.length;
   assert.deepEqual(await readRepositoryGraph("example/repo", "public", ""), indexed);
   assert.equal(calls.length - previousCalls, 2);
