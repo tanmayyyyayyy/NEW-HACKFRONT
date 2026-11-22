@@ -6,6 +6,52 @@ import { matchesAppOrigin } from "../lib/app-origin";
 import { configuredAppUrl, siteOrigin } from "../lib/site-url";
 import { explainEvidence } from "../lib/answer-explanation";
 import { driver } from "../lib/neo4j";
+import { pullSnippet, repositorySnippets } from "../lib/code-evidence";
+import { requestGithub } from "../lib/repository-chat";
+import { sourceFromMessage } from "../lib/code-types";
+import { POST as graph } from "../app/api/graph/route";
+
+test("open pull requests use GitHub's open filter and validate access before listing", async t => {
+  config(t, { APP_ORIGIN: "http://localhost:3000", GITHUB_PUBLIC_READ_TOKEN: undefined });
+  const pages: string[] = [];
+  const fetch = t.mock.method(globalThis, "fetch", async (input: string) => {
+    const url = new URL(input);
+    if (url.pathname === "/repos/example/ui") return Response.json({ full_name: "example/ui", private: false });
+    assert.equal(url.pathname, "/repos/example/ui/pulls");
+    assert.equal(url.searchParams.get("state"), "open");
+    pages.push(url.searchParams.get("page")!);
+    return Response.json([{ number: 42, title: "Update button", draft: true, user: { login: "author" }, updated_at: "2026-11-22" }]);
+  });
+  const list = (mode: string) => graph(new Request(`http://localhost:3000/api/graph?repo=example%2Fui&view=open-pulls&page=2&mode=${mode}`,
+    { method: "POST", headers: { origin: "http://localhost:3000" } }));
+  assert.equal((await list("private")).status, 401);
+  assert.equal(fetch.mock.callCount(), 0);
+  const response = await list("public");
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { pulls: [{ number: 42, title: "Update button", draft: true, author: "author", updated: "2026-11-22" }], hasNext: false });
+  const inChat = await POST(new Request("http://localhost:3000/api/ask", {
+    method: "POST", headers: { origin: "http://localhost:3000", "Content-Type": "application/json" },
+    body: JSON.stringify({ repo: "example/ui", question: "What pull requests are open?", mode: "public", language: "English" }),
+  }));
+  assert.equal(inChat.status, 200);
+  assert.equal((await inChat.json()).openPulls.pulls[0].number, 42);
+  assert.deepEqual(pages, ["2", "1"]);
+});
+
+test("chat recognizes bare GitHub links and preserves a question alongside a PR link", () => {
+  assert.deepEqual(sourceFromMessage("https://github.com/example/ui"), { source: "example/ui", question: "" });
+  assert.deepEqual(sourceFromMessage("Why did the color change? https://github.com/example/ui/pull/9/files"),
+    { source: "https://github.com/example/ui/pull/9", question: "Why did the color change?" });
+  assert.equal(sourceFromMessage("https://other.example/example/ui/pull/9"), null);
+});
+
+test("GitHub rate limits give a retry time and suggest a token for anonymous requests", async t => {
+  t.mock.method(globalThis, "fetch", async () => new Response(null, { status: 403, headers: {
+    "x-ratelimit-remaining": "0", "retry-after": "120",
+  } }));
+  await assert.rejects(requestGithub("/rate_limit"), { status: 429, message: /about 2 minutes.*GITHUB_PUBLIC_READ_TOKEN/ });
+  await assert.rejects(requestGithub("/rate_limit", "fixture"), { status: 429, message: /about 2 minutes\.$/ });
+});
 
 const record = {
   id: "#146", kind: "Merged PR", title: "Wait for chapter refresh", text: "a".repeat(2000),
@@ -175,4 +221,72 @@ test("Render falls back to its public origin while preserving explicit configura
   process.env.APP_ORIGIN = "https://custom.example";
   assert.equal(siteOrigin(), "https://custom.example");
   assert(!matchesAppOrigin("https://fallback.onrender.com", configuredAppUrl()));
+});
+
+test("repository code uses actual lines and pins the GitHub citation to the selected revision", async t => {
+  const sha = "b".repeat(40);
+  const blob = "c".repeat(40);
+  const path = "src/theme & tokens.css";
+  const fetch = t.mock.method(globalThis, "fetch", async (input: string) => {
+    const { pathname, searchParams } = new URL(input);
+    if (pathname === "/repos/example/ui") return Response.json({ full_name: "example/ui", private: false, default_branch: "main" });
+    if (pathname.endsWith("/commits/main")) return Response.json({ sha });
+    if (pathname.endsWith("/commits")) {
+      assert.equal(searchParams.get("until"), "2026-11-01T23:59:59Z");
+      return Response.json([{ sha }]);
+    }
+    if (pathname.endsWith("/git/trees/" + sha)) return Response.json({ tree: [
+      { path, mode: "100644", type: "blob", sha: blob, size: 65 },
+      { path: ".env.local", mode: "100644", type: "blob", sha: blob, size: 65 },
+      { path: "shortcut.css", mode: "120000", type: "blob", sha: blob, size: 65 },
+    ] });
+    assert(pathname.endsWith("/git/blobs/" + blob));
+    return Response.json({ encoding: "base64", content: Buffer.from(":root {\n  --button-color: red;\n}").toString("base64") });
+  });
+  const [snippet, extra] = await repositorySnippets("example/ui", "public", "Where is the button color?", [path, ".env.local", "shortcut.css"], []);
+  assert.equal(extra, undefined);
+  assert.deepEqual(snippet.lines[1], { line: 2, text: "  --button-color: red;" });
+  assert.equal(snippet.url, `https://github.com/example/ui/blob/${sha}/src/theme%20%26%20tokens.css#L1-L3`);
+  assert.equal(snippet.editUrl, "https://github.com/example/ui/edit/main/src/theme%20%26%20tokens.css");
+  assert.equal(fetch.mock.callCount(), 4);
+  const [historical] = await repositorySnippets("example/ui", "public", "Where is the button color?", [path], [], "2026-11-01");
+  assert.equal(historical.editUrl, undefined);
+});
+
+test("PR chat pairs the numbered diff with earlier decisions and edits the PR head fork", async t => {
+  config(t, { APP_ORIGIN: "http://localhost:3000", GITHUB_PUBLIC_READ_TOKEN: undefined });
+  const sha = "a".repeat(40);
+  const path = "src/button.css";
+  const patch = "@@ -15,3 +15,3 @@\n .button {\n-  background: red;\n+  background: green;\n }";
+  const old = { number: 7, title: "Record the button colors", body: "Use the blue draft.", created_at: "2026-10-01", merged_at: "2026-10-02" };
+  const reversal = { number: 8, title: "Replaces #7", body: "Keep the primary button background red.", created_at: "2026-10-03", merged_at: "2026-10-04" };
+  const target = { number: 9, title: "Update the primary button", body: "Switch it to green.", created_at: "2026-10-05", state: "open",
+    base: { repo: { full_name: "example/ui", private: false } }, head: { sha, ref: "fix/button", repo: { full_name: "contributor/ui" } } };
+  const fetch = t.mock.method(globalThis, "fetch", async (input: string) => {
+    const { pathname } = new URL(input);
+    if (pathname === "/repos/example/ui/pulls/9") return Response.json(target);
+    if (pathname === "/repos/example/ui/pulls") return Response.json([reversal, old]);
+    if (pathname.endsWith("/files")) return Response.json([{ filename: path, patch, status: "modified" }]);
+    throw new Error("Unexpected fixture request");
+  });
+  const ask = (repo: string, mode = "public") => POST(new Request("http://localhost:3000/api/ask", {
+    method: "POST", headers: { origin: "http://localhost:3000", "Content-Type": "application/json" },
+    body: JSON.stringify({ repo, question: "Why was the button background changed to green?", mode, language: "English" }),
+  }));
+  assert.equal((await ask("https://github.com/example/ui/pull/9", "private")).status, 401);
+  assert.equal((await ask("https://example.test/example/ui/pull/9")).status, 400);
+  assert.equal(fetch.mock.callCount(), 0);
+  const result = await ask("https://github.com/example/ui/pull/9/files#diff-reference");
+  assert.equal(result.status, 200);
+  const answer = await result.json();
+  assert.match(answer.evidence.find((row: typeof evidence[number]) => row.record.id === "#8").record.text, /background red/);
+  assert.deepEqual(answer.snippets[0].lines.slice(1, 3), [
+    { old: 16, text: "  background: red;", change: "removed" },
+    { line: 16, text: "  background: green;", change: "added" },
+  ]);
+  assert.equal(answer.snippets[0].url, `https://github.com/contributor/ui/blob/${sha}/src/button.css#L15-L17`);
+  assert.equal(answer.snippets[0].editUrl, "https://github.com/contributor/ui/edit/fix/button/src/button.css");
+  const removed = pullSnippet("example/ui", 9, path, "@@ -5 +0,0 @@\n-red", undefined, false);
+  assert.match(removed?.url ?? "", /\/files#diff-[a-f0-9]{64}L5$/);
+  assert.equal(removed?.editUrl, undefined);
 });

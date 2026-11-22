@@ -17,13 +17,13 @@ export default async function Workspace({ searchParams }: { searchParams: Promis
     if (!session) redirect("/account?path=private");
   }
   const example = mode === "public" ? collections.find(item => item.slug === params.example) : undefined;
-  const repo = (Array.isArray(params.repo) ? params.repo[0] : params.repo)?.slice(0, 170) ?? "";
+  const repo = (Array.isArray(params.repo) ? params.repo[0] : params.repo)?.slice(0, 400) ?? "";
   const starter = example?.workspaceQuestion ? { repo: example.repo, question: example.workspaceQuestion } : { repo, question: "" };
   return <><Mast current="workspace"/><main className={styles.workspace} id="main-content"><header className={styles.header}>
     <h1>{mode === "private" ? "Team handover" : "Repository explorer"}</h1>
     <nav className="workspace-modes" aria-label="Workspace mode">
-      <a href="/workspace" aria-current={mode === "public" ? "page" : undefined}>Public repository</a>
-      <a href="/workspace?path=private" aria-current={mode === "private" ? "page" : undefined}>Private handover</a>
+      <a href="/workspace" aria-current={mode === "public" ? "page" : undefined}>Public GitHub</a>
+      <a href="/workspace?path=private" aria-current={mode === "private" ? "page" : undefined}>Private GitHub</a>
     </nav></header>
     <RepositoryChat initialMode={mode} starter={starter}/></main></>;
 }

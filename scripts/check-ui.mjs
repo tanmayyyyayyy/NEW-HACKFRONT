@@ -46,7 +46,9 @@ try {
       ],
       coverage: { files: 1, importFiles: 0, treePartial: false, historyPartial: true },
     };
-    await page.route("**/api/graph?*", route => route.fulfill({ json: graphFixture }));
+    await page.route("**/api/graph?*", route => route.fulfill({ json: new URL(route.request().url()).searchParams.get("view") === "open-pulls"
+      ? { pulls: [{ number: 9, title: "Update the button color", author: "contributor", draft: true, updated: "2026-11-22" }], hasNext: false }
+      : graphFixture }));
     await page.goto(origin + "/graph?repo=example%2Ffirst&repo=example%2Fsecond");
     assert.equal(await page.getByLabel("GitHub repository", { exact: true }).inputValue(), "example/first");
     await page.getByRole("button", { name: "Index repository", exact: true }).click();
@@ -151,6 +153,41 @@ try {
     await repository.fill("example/different");
     await page.getByRole("button", { name: "Switch repository" }).click();
     await page.getByRole("heading", { name: "What changed, and why?" }).waitFor();
+    const pullUrl = "https://github.com/example/ui/pull/9";
+    await repository.fill("");
+    await question.fill("https://github.com/AppFuton/Futon");
+    await page.getByRole("button", { name: "Analyze repository", exact: true }).click();
+    await page.getByRole("region", { name: "Repository overview" }).getByText("Files indexed").waitFor();
+    await page.getByRole("button", { name: "Knowledge graph", exact: true }).click();
+    await page.getByRole("region", { name: "Indexed repository" }).waitFor();
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("region", { name: "Repository overview" }).waitFor();
+    const fileUrl = "https://github.com/contributor/ui/blob/" + "a".repeat(40) + "/src/button.css#L16";
+    const editUrl = "https://github.com/contributor/ui/edit/fix/button/src/button.css";
+    await page.route("**/api/ask", async route => {
+      assert.match(route.request().postDataJSON().repo, /\/pull\/9$/);
+      assert.equal(route.request().postDataJSON().includeCode, true);
+      assert.match(route.request().postDataJSON().question, /Review this pull request/);
+      await route.fulfill({ json: {
+        evidence: [], throughDate: null, recordCount: 1, matchBasis: "PR #9", query: null,
+        reviewNote: "Earlier decisions touch these files.",
+        review: { title: "Use the new button color", number: 9, state: "open", files: 1, matched: 1, url: pullUrl, possibleConflict: true },
+        snippets: [{ path: "src/button.css", basis: "pull request diff", url: fileUrl, editUrl,
+          diffUrl: pullUrl + "/files", lines: [{ old: 16, text: "background: red;", change: "removed" }, { line: 16, text: "background: green;", change: "added" }] }],
+      } });
+    });
+    await question.fill(pullUrl);
+    await page.getByRole("button", { name: "Review pull request", exact: true }).click();
+    await page.getByRole("region", { name: "Pull request review" }).getByText("Possible decision conflict").waitFor();
+    const code = page.getByRole("region", { name: "Code evidence" });
+    await code.getByText("background: green;", { exact: true }).waitFor();
+    assert.equal(await code.getByRole("link", { name: /View exact lines on GitHub/ }).getAttribute("href"), fileUrl);
+    assert.equal(await code.getByRole("link", { name: /Edit on GitHub/ }).getAttribute("href"), editUrl);
+    assert.equal(await page.getByText("View executed Cypher", { exact: true }).count(), 0);
+    await page.getByRole("button", { name: "Open pull requests", exact: true }).click();
+    await page.getByText("#9 · Draft · @contributor", { exact: false }).waitFor();
+    await page.getByRole("button", { name: "Review PR #9" }).click();
+    await page.getByRole("region", { name: "Pull request review" }).getByText("Possible decision conflict").last().waitFor();
     await page.goto(origin + "/workspace?path=private");
     await page.waitForURL("**/account?path=private");
     await page.getByRole("radio",{name:/Public repo learning/}).check();

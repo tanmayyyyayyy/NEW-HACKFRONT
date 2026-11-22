@@ -3,6 +3,7 @@ import { configuredAppUrl } from "@/lib/site-url";
 import { accounts } from "@/lib/auth";
 import { withQueryBudget } from "@/lib/query-budget";
 import { repositoryName, RepositoryError } from "@/lib/repository-chat";
+import { listOpenPulls } from "@/lib/open-pulls";
 import { readRepositoryGraph } from "@/lib/repository-graph";
 
 export async function POST(request: Request) {
@@ -25,6 +26,12 @@ export async function POST(request: Request) {
         token = /^Bearer ([A-Za-z0-9_]{10,250})$/.exec(request.headers.get("authorization") || "")?.[1];
         if (!token) return reply({ error: "Provide a GitHub read token scoped to this repository." }, 401);
         owner = session.user.id;
+      }
+      if (url.searchParams.get("view") === "open-pulls") {
+        const page = Number(url.searchParams.get("page") ?? "1");
+        if (!Number.isSafeInteger(page) || page < 1 || page > 500) return reply({ error: "That page is out of range." }, 400);
+        const credential = mode === "private" ? token : process.env.GITHUB_PUBLIC_READ_TOKEN;
+        return reply(await listOpenPulls(repo, mode, credential, page));
       }
       return reply(await readRepositoryGraph(repo, mode, owner, token, url.searchParams.get("refresh") === "1"));
     } catch (error) {

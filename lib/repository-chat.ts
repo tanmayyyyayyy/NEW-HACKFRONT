@@ -24,8 +24,16 @@ export async function requestGithub(path: string, token?: string) {
     cache: "no-store", redirect: "error", signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) {
-    if (response.status === 429 || response.headers.get("x-ratelimit-remaining") === "0") {
-      throw new RepositoryError("GitHub is rate-limiting requests. Try again after the quota resets.", 429);
+    const quotaExhausted = response.headers.get("x-ratelimit-remaining") === "0";
+    const retryAfter = response.headers.get("retry-after");
+    if (response.status === 429 || (response.status === 403 && (quotaExhausted || retryAfter))) {
+      const reset = quotaExhausted ? Number(response.headers.get("x-ratelimit-reset")) * 1000 : 0;
+      const minutes = Math.ceil(Math.max(Number(retryAfter) / 60, (reset - Date.now()) / 60_000));
+      const retry = Number.isSafeInteger(minutes) && minutes > 0
+        ? `Try again in about ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`
+        : "Wait a few minutes before trying again.";
+      const setup = token ? "" : " For public repositories, configure GITHUB_PUBLIC_READ_TOKEN on the server.";
+      throw new RepositoryError("GitHub's request limit has been reached. " + retry + setup, 429);
     }
     if ([401, 403, 404].includes(response.status)) {
       throw new RepositoryError("GitHub could not confirm access to this repository or its history.", 403);

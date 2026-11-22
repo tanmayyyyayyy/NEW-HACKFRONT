@@ -5,6 +5,8 @@ import type { GraphEdge, GraphNode, RepositoryGraph } from "../../lib/graph-type
 import type { AIReview, ReviewFinding } from "../../lib/pr-review";
 import { importSpecifiers, sourceFileLimit, sourceFilePattern, treeEntryLimit } from "../../lib/graph-model";
 import { SpatialGraph } from "./SpatialGraph";
+import { CodeEvidence } from "../CodeEvidence";
+import type { CodeSnippet } from "@/lib/code-types";
 import { RepositoryGraph3D } from "./RepositoryGraph3D";
 
 type View = "files" | "imports" | "history" | "conflicts" | "risk" | "review";
@@ -37,7 +39,9 @@ function dateLabel(value?: string) {
   return Number.isNaN(date.valueOf()) ? "Date not available" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(date);
 }
 
-export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: string; initialPrivate: boolean }) {
+export function GraphExplorer({ initialRepo, initialPrivate, workspaceGraph }: {
+  initialRepo: string; initialPrivate: boolean; workspaceGraph?: RepositoryGraph;
+}) {
   const [repo, setRepo] = useState(initialRepo);
   const [privateRepo, setPrivateRepo] = useState(initialPrivate);
   const [source, setSource] = useState<"github" | "folder">("github");
@@ -46,7 +50,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const [token, setToken] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
-  const [graph, setGraph] = useState<RepositoryGraph>();
+  const [graph, setGraph] = useState(workspaceGraph);
   const [view, setView] = useState<View>("files");
   const [focus, setFocus] = useState("");
   const [search, setSearch] = useState("");
@@ -59,7 +63,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const [useAiReview, setUseAiReview] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState("");
-  const [reviewResult, setReviewResult] = useState<{ pull: { number: number; title: string; author: string; createdAt: string; mergedAt: string | null; date: string; url: string; state: string }; findings: ReviewFinding[]; coverage: { changedFiles: number; historicalReversals: number; historyWindow: string }; aiReview: AIReview }>();
+  const [reviewResult, setReviewResult] = useState<{ pull: { number: number; title: string; author: string; createdAt: string; mergedAt: string | null; date: string; url: string; state: string }; findings: ReviewFinding[]; snippets?: CodeSnippet[]; coverage: { changedFiles: number; historicalReversals: number; historyWindow: string }; aiReview: AIReview }>();
 
   const { nodes, edges, byId } = useMemo(() => {
     if (view === "risk") {
@@ -234,7 +238,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   }
 
   return <>
-    <div className="workspace-modes graph-source" aria-label="Repository source">
+    {!workspaceGraph && <><div className="workspace-modes graph-source" aria-label="Repository source">
       <button type="button" aria-pressed={source === "github"} onClick={() => changeSource("github")} disabled={busy}>GitHub repository</button>
       <button type="button" aria-pressed={source === "folder"} onClick={() => changeSource("folder")} disabled={busy}>Local folder</button>
     </div>
@@ -266,14 +270,15 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
         {savedFolders?.length === 0 && <small>No saved folders.</small>}
       </div>
     </form>}
+    </>}
     {status && <p role="alert" className="graph-notice sf-error">{status}</p>}
     {busy && <p role="status" className="graph-notice graph-progress">{source === "github" ? "Reading GitHub structure and a sample of history, then mapping documentation and ownership signals." : "Reading the folder and mapping documentation signals."}</p>}
     {graph && <section className="graph-workbench" aria-label="Indexed repository">
       <header className="graph-bar">
         <div><strong>{graph.repository}</strong> <code>{graph.revision.slice(0, 8)}</code></div>
-        {graph.source !== "folder" && <a href={"/workspace?" + new URLSearchParams({ repo: graph.repository, path: privateRepo ? "private" : "public" })}>Open in chat</a>}
+        {!workspaceGraph && graph.source !== "folder" && <a href={"/workspace?" + new URLSearchParams({ repo: graph.repository, path: privateRepo ? "private" : "public" })}>Open in chat</a>}
         <nav className="workspace-modes" aria-label="Graph view">
-          {views.map(item => <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => changeView(item.id)}>{item.label}{item.id === "conflicts" && conflictEdges.length > 0 ? ` · ${conflictEdges.length}` : item.id === "risk" && riskAreas.length > 0 ? ` · ${riskAreas.length}` : ""}</button>)}
+          {views.filter(item => !workspaceGraph || item.id !== "review").map(item => <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => changeView(item.id)}>{item.label}{item.id === "conflicts" && conflictEdges.length > 0 ? ` · ${conflictEdges.length}` : item.id === "risk" && riskAreas.length > 0 ? ` · ${riskAreas.length}` : ""}</button>)}
         </nav>
       </header>
       <div className="graph-layout">
@@ -314,6 +319,11 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
                 <p>@{reviewResult.pull.author} · Created {dateLabel(reviewResult.pull.createdAt)}{reviewResult.pull.mergedAt ? ` · Merged ${dateLabel(reviewResult.pull.mergedAt)}` : ""} · {reviewResult.pull.state}</p></div>
                 <span>{reviewResult.findings.length + reviewResult.aiReview.findings.length} findings</span></div>
               <p className="review-coverage">Compared {reviewResult.coverage.changedFiles} changed files against {reviewResult.coverage.historicalReversals} explicitly linked reversals and {reviewResult.coverage.historyWindow.toLowerCase()}.</p>
+              <a href={"/workspace?" + new URLSearchParams({ repo: reviewResult.pull.url, path: privateRepo ? "private" : "public" })}>Ask about this pull request ↗</a>
+              {!!reviewResult.snippets?.length && <section aria-label="Pull request code evidence">
+                <h4>Proposed code changes</h4>
+                {reviewResult.snippets.map(snippet => <CodeEvidence key={snippet.path} snippet={snippet} />)}
+              </section>}
               {reviewResult.aiReview.status === "ready" && <section className="review-ai-results" aria-label="AI review criteria">
                 <div className={`review-verdict verdict-${reviewResult.aiReview.recommendation}`}>
                   {reviewResult.aiReview.recommendation === "resolve-before-merge" ? "Direct decision conflict · resolve before merge" : reviewResult.aiReview.recommendation === "review" ? "Historical signal · reviewer follow-up recommended" : "No direct conflict found in the matched history"}

@@ -93,6 +93,10 @@ flowchart LR
 
 Use **Attach files** to search the repository index and select up to three paths. For each path the workspace checks up to two GitHub commits and up to one associated PR per commit. Use the microphone button to dictate into the same composer.
 
+Paste a GitHub repository or pull request link directly into the chat composer and submit. A repository link indexes the file tree and shows the sampled history. A PR link runs the same historical review as the graph workspace. Add a question alongside the link or ask follow-ups after the first result. **Code evidence** shows numbered lines or PR diffs. **View exact lines on GitHub** opens the cited revision, and **Edit on GitHub** opens an editable branch when available. Optional AI review uses Gemini for PRs when configured and Sarvam or OpenRouter for explanations. Code lookup checks up to eight matching text files and shows up to three excerpts.
+
+The workspace sidebar uses the same repository for **Chat**, **Open pull requests** and **Knowledge graph**. The PR list includes drafts and loads 20 at a time. Choose **Review in chat** to inspect a PR without pasting another URL.
+
 **2. Connect the records.** A temporary `SkillForgeChatRun` node owns the evidence records for one request. The graph uses three kinds of historical relationship.
 
 | Relationship | Meaning |
@@ -108,6 +112,18 @@ Use **Attach files** to search the repository index and select up to three paths
 ### Where the evidence stops
 
 GitHub history can establish what someone wrote, which files changed and when two recorded decisions conflict. A PR author may differ from the person who chose the design. An undocumented conversation or a loosely worded reversal may leave no detectable relationship. A date cutoff includes a sampled PR from its opening date and marks it merged once its merge date falls within the cutoff. Descriptions and changed-file lists still reflect the retrieved version. Use explicit PR numbers, code identifiers or English search terms for the most reliable retrieval. Multilingual generation applies to the explanation.
+
+## Local MCP server
+
+Open [Connect a coding agent](http://localhost:3000/connect) and copy the setup prompt into a local coding agent with stdio MCP support. If the agent is working in a different project, include the SkillForge checkout path using the optional settings on that page. Run `npm run check:mcp` while the app is running to discover the tools and test Futon PR #146.
+
+For manual setup, start SkillForge with `npm start` and register a **stdio** server named `skillforge`. Use `node` as the command and the following arguments, substituting the absolute paths for your checkout.
+
+```json
+["--import", "file:///C:/path/to/NEW-HACKFRONT/node_modules/tsx/dist/loader.mjs", "C:/path/to/NEW-HACKFRONT/scripts/mcp.ts"]
+```
+
+The MCP server uses `http://localhost:3000` by default. Set `SKILLFORGE_URL` in the MCP client if you run SkillForge on a different local port. It exposes `ask_repository`, `review_pull_request`, `list_open_pull_requests` and `repository_graph` for public GitHub data. Graph requests may save a local index. GitHub credentials stay in the running web app.
 
 ## Query API
 
@@ -202,5 +218,6 @@ This configuration targets a single application instance. SQLite needs durable s
 | Request origin could not be verified | Use the scheme and port configured in `APP_ORIGIN`. For a local origin, the app accepts `localhost`, `127.0.0.1`, and `[::1]` on that port. Hosted origins must match exactly. Restart after changing the environment. |
 | Public demo loads but queries fail | Check `/api/health`, the Neo4j database name, credentials and write permission for temporary projections. |
 | GitHub denies a private repository | Verify the engineer's repository membership, selected token repository, read permissions, expiry and organization approval. |
+| GitHub's request limit has been reached | For local public indexing, set `GITHUB_PUBLIC_READ_TOKEN` in `.env.local` to a fine-grained token with access to public repositories only, restart the app, then retry. |
 | Evidence appears without an AI explanation | Check consent, server-side keys and provider availability. Confirm that the query returned evidence. |
 | A known decision is missing | Try its PR or issue number, check the cutoff and inspect the sampled record count. Large repositories have bounded coverage. |

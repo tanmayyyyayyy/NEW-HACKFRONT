@@ -16,9 +16,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ p
       <section className="outer hero">
         <div className="hero-copy">
           <h1>Find the <em>why</em><br />behind the code.</h1>
-          <p>Ask a question about a GitHub repository. Follow the answer through commits, pull requests, and the decisions that changed them.</p>
+          <p>Review a pull request against earlier decisions, or ask how a GitHub repository works. Follow each answer back to the code.</p>
           <div className="hero-actions">
-            <a className="ink-button" href="/workspace">Open workspace <span className="arrow" aria-hidden="true" /></a>
+            <a className="ink-button" href="/workspace">Start in chat <span className="arrow" aria-hidden="true" /></a>
             <a className="text-button" href="/graph">Map a repository <span className="arrow" aria-hidden="true" /></a>
           </div>
         </div>
