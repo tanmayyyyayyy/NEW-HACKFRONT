@@ -24,3 +24,4 @@ jobs:
           echo "🤖 **Agent Connect MCP:** [https://skillforge-repository-desk.onrender.com/connect](https://skillforge-repository-desk.onrender.com/connect)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Deployment is verified, healthy, and operational on Render." >> $GITHUB_STEP_SUMMARY
+

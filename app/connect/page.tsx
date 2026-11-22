@@ -22,6 +22,6 @@ export default function ConnectPage() {
       <li>{hosted ? "The bridge uses this hosted deployment. No local web server is needed." : "Keep the local web app running, or enter your deployment URL below."}</li>
     </ol>
     <SetupPrompt defaultOrigin={origin} />
-    <p className={styles.note}>Works with local MCP clients that support stdio, including Codex, Claude Code, Cursor, and VS Code. SkillForge’s MCP tools use public GitHub data.</p>
+    <p className={styles.note}>Works with local MCP clients that support standard I/O (<code>stdio</code>), including Codex, Claude Code, Cursor, and VS Code. SkillForge’s MCP tools use public GitHub data.</p>
   </main></>;
 }
