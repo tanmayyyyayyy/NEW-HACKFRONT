@@ -3,6 +3,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import type { GraphEdge, GraphNode, RepositoryGraph } from "../../lib/graph-types";
 import { importSpecifiers, sourceFileLimit, sourceFilePattern, treeEntryLimit } from "../../lib/graph-model";
+import { SpatialGraph } from "./SpatialGraph";
 
 type View = "files" | "imports" | "history" | "conflicts";
 const views: { id: View; label: string; empty: string }[] = [
@@ -45,6 +46,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
   const [focus, setFocus] = useState("");
   const [search, setSearch] = useState("");
   const [zoom, setZoom] = useState(100);
+  const [dimension, setDimension] = useState<"2D" | "3D">("2D");
   const [page, setPage] = useState(0);
   const [nodeLimit, setNodeLimit] = useState(36);
   const [overridesOnly, setOverridesOnly] = useState(false);
@@ -225,6 +227,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
     {graph && <section className="graph-workbench" aria-label="Indexed repository">
       <header className="graph-bar">
         <div><strong>{graph.repository}</strong> <code>{graph.revision.slice(0, 8)}</code></div>
+        {graph.source !== "folder" && <a href={"/workspace?" + new URLSearchParams({ repo: graph.repository, path: privateRepo ? "private" : "public" })}>Open in chat</a>}
         <nav className="workspace-modes" aria-label="Graph view">
           {views.map(item => <button key={item.id} type="button" aria-pressed={view === item.id} onClick={() => changeView(item.id)}>{item.label}{item.id === "conflicts" && conflictEdges.length > 0 ? ` · ${conflictEdges.length}` : ""}</button>)}
         </nav>
@@ -272,13 +275,18 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
           </section>}
           <div className="graph-tools">
             <h2>{selectedView.label}</h2>
-            <div className="graph-zoom" aria-label="Diagram zoom">
+            <div className="workspace-modes" role="group" aria-label="Graph layout">
+              {(["2D", "3D"] as const).map(layout => <button key={layout} type="button" aria-pressed={dimension === layout}
+                onClick={() => setDimension(layout)}>{layout}</button>)}
+            </div>
+            {dimension === "2D" && <div className="graph-zoom" aria-label="Diagram zoom">
               <button type="button" aria-label="Zoom out" disabled={zoom <= 65} onClick={() => setZoom(value => Math.max(65, value - 15))}>−</button>
               <button type="button" aria-label="Reset zoom" onClick={() => setZoom(100)}>{zoom}%</button>
               <button type="button" aria-label="Zoom in" disabled={zoom >= 160} onClick={() => setZoom(value => Math.min(160, value + 15))}>+</button>
-            </div>
+            </div>}
           </div>
           {selected ? <>
+            {dimension === "3D" ? <SpatialGraph selected={selected} incoming={left} outgoing={right} byId={byId} inspect={inspect} /> : <>
             <div className="graph-viewport" tabIndex={0} aria-label="Scrollable repository diagram">
               <div className="graph-canvas" style={{ height, minWidth: 620, width: Math.max(100, zoom) + "%", zoom: zoom < 100 ? zoom / 100 : undefined }}>
                 <div className="graph-lanes"><span>{headings[0]}</span><span>Selected node</span><span>{headings[1]}</span></div>
@@ -303,6 +311,7 @@ export function GraphExplorer({ initialRepo, initialPrivate }: { initialRepo: st
               {right.length > 0 && <div className="graph-compact-lane"><small>{headings[1]}</small>
                 {right.map(edge => nodeButton(byId.get(edge.to)!, undefined, undefined, edge))}</div>}
             </div>
+            </>}
             <div className="graph-inspector">
               <div><strong>{selected.detail}</strong><small>{incoming.length} incoming · {outgoing.length} outgoing</small></div>
               {selected.url && <a href={selected.url} target="_blank" rel="noreferrer">View on GitHub <span className="arrow" aria-hidden="true" /></a>}

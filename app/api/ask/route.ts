@@ -12,6 +12,9 @@ const requestSchema = z.object({
   mode: z.enum(["public", "private"]),
   language: z.enum(["English", "Hindi", "Hinglish"]),
   contextIds: z.array(z.string().regex(/^(?:#[1-9]\d{0,9}|[a-f0-9]{40})$/)).max(5).default([]),
+  files: z.array(z.string().min(1).max(600).refine(path =>
+    !/[\\\u0000-\u001f]/.test(path) && path.split("/").every(part => part && part !== "." && part !== "..")
+  )).max(3).default([]),
   throughDate: z.iso.date().optional(),
   sarvam: z.boolean().default(false),
 });
@@ -49,7 +52,9 @@ export async function POST(request: Request) {
   let input: unknown;
   try { input = JSON.parse(body); } catch { return reply({ error: "Invalid JSON request." }, 400); }
   const parsed = requestSchema.safeParse(input);
-  if (!parsed.success) return reply({ error: "Enter a valid repository and a question between 3 and 500 characters." }, 400);
+  if (!parsed.success) return reply({ error: parsed.error.issues.some(issue => issue.path[0] === "files")
+    ? "Attach up to three valid repository file paths."
+    : "Enter a valid repository and a question between 3 and 500 characters." }, 400);
   try {
     const { mode, question, language, sarvam } = parsed.data;
     if (mode === "private") {
@@ -59,7 +64,7 @@ export async function POST(request: Request) {
     const authorization = request.headers.get("authorization");
     const token = mode === "private" ? /^Bearer ([A-Za-z0-9_]{10,250})$/.exec(authorization ?? "")?.[1] : undefined;
     return await withQueryBudget(async () => {
-      const trail = await repositoryEvidence(repo, mode, question, token, parsed.data.contextIds, parsed.data.throughDate);
+      const trail = await repositoryEvidence(repo, mode, question, token, parsed.data.contextIds, parsed.data.throughDate, parsed.data.files);
       const explanation = sarvam ? await explainEvidence(language, question, trail.evidence) : null;
       return reply({ ...trail, summary: explanation?.summary ?? null,
         sarvamUnavailable: explanation?.status === "unavailable" || explanation?.status === "not-configured",

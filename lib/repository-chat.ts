@@ -95,30 +95,46 @@ type Thread = {
 type Comment = { id: number; body: string; user: { login: string } | null; created_at: string };
 type Commit = { sha: string; author: { login: string } | null; commit: { message: string; author: { date: string } } };
 
-async function history(repo: string, mode: "public" | "private", question: string, token?: string, throughDate?: string) {
+async function history(repo: string, mode: "public" | "private", question: string, token?: string, throughDate?: string, files: string[] = []) {
   const root = "https://github.com/" + repo;
   const path = "/repos/" + repo;
   const records = new Map<string, Evidence>();
   function add(kind: string, id: string, title: string, text: string, author: string, date: string, url: string) {
-    records.set(id, { id, kind, title: title.slice(0, 300), text: text.slice(0, 2800), author, date, url });
+    const record: Evidence = { id, kind, title: title.slice(0, 300), text: text.slice(0, 2800), author, date, url };
+    records.set(id, record);
+    return record;
   }
   const inWindow = (date: string) => !throughDate || Boolean(date && date.slice(0, 10) <= throughDate);
   function addPull(number: number, title: string, text: string, author: string, createdAt: string, mergedAt?: string | null) {
     const merged = mergedAt && inWindow(mergedAt) ? mergedAt : undefined;
-    add(merged ? "Merged PR" : "PR", "#" + number, title, text, author,
+    return add(merged ? "Merged PR" : "PR", "#" + number, title, text, author,
       merged ?? createdAt, root + "/pull/" + number);
   }
   const links: Link[] = [];
   const link = (from: string, to: string, kind: string, basis: string) => links.push({ from, to, kind, basis });
+  const fileIds = new Set<string>();
+  const publicToken = mode === "public" ? process.env.GITHUB_PUBLIC_READ_TOKEN : undefined;
+  const github = <T>(endpoint: string) => mode === "public"
+    ? publicGithub<T>(endpoint, publicToken)
+    : uncachedGithub<T>(endpoint, token);
+  type Metadata = { private: boolean; full_name: string };
+  async function verifyRepository() {
+    const metadata = publicToken ? await uncachedGithub<Metadata>(path, publicToken) : await github<Metadata>(path);
+    if (metadata.full_name.toLowerCase() !== repo || metadata.private !== (mode === "private")) {
+      throw new RepositoryError("The repository is unavailable in the selected path.", 403);
+    }
+  }
+  function addCommit(row: Commit) {
+    return add("Commit", row.sha, row.commit.message.split("\n")[0], row.commit.message,
+      row.author?.login ?? "", row.commit.author.date, root + "/commit/" + row.sha);
+  }
 
   if (mode === "public" && repo === "appfuton/futon") {
+    if (files.length) await verifyRepository();
     const fixture = await readGithubData();
     for (const pull of fixture.pulls) {
-      addPull(pull.number, pull.title, pull.body, pull.author, pull.createdAt, pull.mergedAt);
-    }
-    for (const pr of fixture.pulls) {
-      const record = records.get("#" + pr.number);
-      if (record) record.files = pr.files.slice(0, 12).map(file => file.path);
+      const record = addPull(pull.number, pull.title, pull.body, pull.author, pull.createdAt, pull.mergedAt);
+      record.files = pull.files.slice(0, 12).map(file => file.path);
     }
     for (const issue of fixture.issues) {
       add("Issue", "#" + issue.number, issue.title, issue.body, issue.author, issue.createdAt, root + "/issues/" + issue.number);
@@ -153,16 +169,8 @@ async function history(repo: string, mode: "public" | "private", question: strin
     }
   } else {
     if (mode === "private" && !token) throw new RepositoryError("Provide your own read-only GitHub token for this repo.", 401);
-    const publicToken = mode === "public" ? process.env.GITHUB_PUBLIC_READ_TOKEN : undefined;
-    const github = <T>(endpoint: string) => mode === "public"
-      ? publicGithub<T>(endpoint, publicToken)
-      : uncachedGithub<T>(endpoint, token);
-    type Metadata = { private: boolean; full_name: string };
     // Recheck visibility before using cached history with an authenticated public client.
-    const metadata = publicToken ? await uncachedGithub<Metadata>(path, publicToken) : await github<Metadata>(path);
-    if (metadata.full_name.toLowerCase() !== repo || metadata.private !== (mode === "private")) {
-      throw new RepositoryError("The repository is unavailable in the selected path.", 403);
-    }
+    await verifyRepository();
     const [pulls, issues, commits] = await Promise.all([
       github<Thread[]>(path + "/pulls?state=closed&sort=updated&per_page=20"),
       github<Thread[]>(path + "/issues?state=all&sort=updated&per_page=20"),
@@ -179,8 +187,7 @@ async function history(repo: string, mode: "public" | "private", question: strin
     pulls.forEach(row => saveThread(row, true));
     issues.filter(row => !row.pull_request).forEach(row => saveThread(row, false));
     for (const row of commits) {
-      if (/^[a-f\d]{40}$/.test(row.sha)) add("Commit", row.sha, row.commit.message.split("\n")[0], row.commit.message,
-        row.author?.login ?? "", row.commit.author.date, root + "/commit/" + row.sha);
+      if (/^[a-f\d]{40}$/.test(row.sha)) addCommit(row);
     }
     await Promise.all([...new Set(findMentions(question))].slice(0, 3).map(async number => {
       if (!records.has("#" + number)) {
@@ -206,6 +213,37 @@ async function history(repo: string, mode: "public" | "private", question: strin
       }
     }));
   }
+  if (files.length) {
+    const matches = await Promise.all([...new Set(files)].map(async file => {
+      const params = new URLSearchParams({ path: file, per_page: "2" });
+      if (throughDate) params.set("until", throughDate + "T23:59:59Z");
+      const commits = await github<Commit[]>(path + "/commits?" + params);
+      return [file, commits.slice(0, 2).filter(row => /^[a-f\d]{40}$/.test(row.sha) && inWindow(row.commit.author.date))] as const;
+    }));
+    const commits = new Map<string, Evidence>();
+    for (const [file, related] of matches) {
+      for (const row of related) {
+        const record = commits.get(row.sha) ?? addCommit(row);
+        commits.set(row.sha, record);
+        record.files = [...new Set([...(record.files ?? []), file])];
+        fileIds.add(record.id);
+      }
+    }
+    const pulls = await Promise.all([...commits].map(async ([sha, record]) => {
+      const rows = await github<Thread[]>(path + "/commits/" + sha + "/pulls?per_page=1");
+      return { record, pull: rows[0] };
+    }));
+    for (const { record, pull } of pulls) {
+      if (!pull || !inWindow(pull.created_at)) continue;
+      const id = "#" + pull.number;
+      const existing = records.get(id);
+      const source = existing ?? addPull(pull.number, pull.title, pull.body ?? "", pull.user?.login ?? "", pull.created_at, pull.merged_at);
+      if (!inWindow(source.date)) continue;
+      source.files = [...new Set([...(source.files ?? []), ...(record.files ?? [])])];
+      fileIds.add(id);
+      link(id, record.id, "REFERENCES", "GitHub associates this pull request with the commit that changed the attached file.");
+    }
+  }
   for (const row of records.values()) {
     if (!inWindow(row.date)) records.delete(row.id);
   }
@@ -220,7 +258,7 @@ async function history(repo: string, mode: "public" | "private", question: strin
       if (older && older.date < row.date) link(row.id, older.id, "SUPERSEDES", "Explicit replacement reference in source history");
     }
   }
-  return { records: [...records.values()], links };
+  return { records: [...records.values()], links, fileIds: [...fileIds] };
 }
 
 const MATCH_EVIDENCE = `
@@ -228,20 +266,20 @@ MATCH (scope:SkillForgeChatRun)
 WHERE elementId(scope) = $scope
 MATCH (scope)-[:HAS_RECORD]->(r)
 WITH r, size([word IN $terms WHERE toLower(r.title + " " + r.text) CONTAINS word]) AS overlap,
-  CASE WHEN r.id IN $refs THEN 100 ELSE 0 END +
+  CASE WHEN r.id IN $refs THEN 1000 WHEN r.id IN $fileIds THEN 100 ELSE 0 END +
   size([word IN $terms WHERE toLower(r.title) CONTAINS word]) * 4 +
   size([word IN $terms WHERE toLower(r.text) CONTAINS word]) AS score
-WHERE (size($refs) = 0 AND overlap >= 2 AND score >= 5) OR r.id IN $refs
+WHERE (NOT $hasFiles AND size($refs) = 0 AND overlap >= 2 AND score >= 5) OR r.id IN $refs OR r.id IN $fileIds
 ORDER BY score DESC, r.date DESC LIMIT 5
 OPTIONAL MATCH (r)-[rel:DISCUSSION|REFERENCES|SUPERSEDES]-(other)
 RETURN properties(r) AS record, collect(DISTINCT {kind:type(rel), basis: rel.basis,
   from: startNode(rel).id, to: endNode(rel).id, record:properties(other)})[..8] AS links
 `;
 
-export async function repositoryEvidence(repo: string, mode: "public" | "private", question: string, token?: string, contextIds: string[] = [], throughDate?: string) {
+export async function repositoryEvidence(repo: string, mode: "public" | "private", question: string, token?: string, contextIds: string[] = [], throughDate?: string, files: string[] = []) {
   const explicit = findMentions(question).map(number => "#" + number);
-  const refs = [...new Set(explicit.length ? explicit : contextIds)];
-  const { records, links } = await history(repo, mode, [question, ...refs].join(" "), token, throughDate);
+  const refs = [...new Set(explicit.length ? explicit : files.length ? [] : contextIds)];
+  const { records, links, fileIds } = await history(repo, mode, [question, ...refs].join(" "), token, throughDate, files);
   const stop = new Set("why what when how this that the and for does did was are were use from with into can you explain about kyun kyon hai hua iska kya kaise kaun batao mujhe".split(" "));
   const terms = [...new Set((question.toLowerCase().match(/[a-z][a-z0-9_-]{2,}/g) ?? []).filter(word => !stop.has(word)))].slice(0, 15);
   const session = driver.session({ database: process.env.NEO4J_DATABASE || "neo4j", defaultAccessMode: neo4j.session.WRITE });
@@ -259,7 +297,7 @@ export async function repositoryEvidence(repo: string, mode: "public" | "private
         FOREACH (_ IN CASE WHEN link.kind = 'REFERENCES' THEN [1] ELSE [] END | CREATE (a)-[:REFERENCES {basis:link.basis}]->(b))
         FOREACH (_ IN CASE WHEN link.kind = 'DISCUSSION' THEN [1] ELSE [] END | CREATE (a)-[:DISCUSSION {basis:link.basis}]->(b))`,
       { scope, links });
-      const matches = await tx.run(MATCH_EVIDENCE, { scope, terms, refs });
+      const matches = await tx.run(MATCH_EVIDENCE, { scope, terms, refs, fileIds, hasFiles: files.length > 0 });
       return {
         evidence: matches.records.map(row => ({
           record: row.get("record") as Evidence,
@@ -267,7 +305,7 @@ export async function repositoryEvidence(repo: string, mode: "public" | "private
         })),
         throughDate: throughDate || null,
         recordCount: records.length,
-        matchBasis: matches.records.length ? (explicit.length ? "Exact PR or issue number" : refs.length ? "Selected conversation sources" : "Keyword overlap in repository history") : "Insufficient evidence",
+        matchBasis: matches.records.length ? (files.length ? "Attached file history" : explicit.length ? "Exact PR or issue number" : refs.length ? "Selected conversation sources" : "Keyword overlap in repository history") : "Insufficient evidence",
         query: MATCH_EVIDENCE.trim(),
         bundled: mode === "public" && repo === "appfuton/futon",
       };

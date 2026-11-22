@@ -9,14 +9,17 @@ type Entry = { path: string; sha: string; type: string; size?: number };
 type Commit = { sha: string; commit: { message: string }; parents?: { sha: string }[] };
 type Pull = { number: number; title: string; body: string | null; merge_commit_sha: string | null; merged_at: string | null; created_at?: string | null; user?: { login?: string } | null };
 const shaPattern = /^[a-f0-9]{40}$/i;
+const analysisVersion = 2;
 
 const data = async <T>(path: string, token?: string) => JSON.parse(await requestGithub(path, token)) as T;
 const pullId = (number: number) => "pull:" + number;
 const commitId = (sha: string) => "commit:" + sha;
 function supersededPullReferences(text: string) {
   const references = new Set(Array.from(text.matchAll(/\b(?:reverts?|supersedes?|replaces?)\s+(?:PR\s+)?#(\d+)/gi), match => Number(match[1])));
-  const changesDecision = /\b(?:chang(?:e|es|ed|ing)|switch(?:es|ed|ing)|modif(?:y|ies|ied|ying))\s+(?:(?:the|its|their)\s+)?(?:default|behavior|behaviour|approach|strategy|architecture|policy)\b/i.test(text);
-  if (changesDecision) for (const number of findMentions(text)) references.add(number);
+  const changesDecision = /\b(?:chang(?:e|es|ed|ing)|switch(?:es|ed|ing)|modif(?:y|ies|ied|ying))\s+(?:(?:the|its|their)\s+)?(?:default|behavior|behaviour|approach|strategy|architecture|policy)\b/i;
+  for (const sentence of text.split(/[.!?](?=\s)|\r?\n/)) {
+    if (changesDecision.test(sentence)) for (const number of findMentions(sentence)) references.add(number);
+  }
   return references;
 }
 export async function readRepositoryGraph(repository: string, mode: "public" | "private", owner: string, token?: string, refresh = false) {
@@ -39,7 +42,7 @@ export async function readRepositoryGraph(repository: string, mode: "public" | "
     );
     if (cached.records.length) {
       const snapshot = JSON.parse(cached.records[0].get("snapshot")) as RepositoryGraph;
-      if (snapshot.nodes.filter(node => node.kind === "pull").every(node => node.evidence !== undefined)) return snapshot;
+      if (snapshot.analysisVersion === analysisVersion) return snapshot;
     }
   }
   const web = "https://github.com/" + repository;
@@ -52,6 +55,7 @@ export async function readRepositoryGraph(repository: string, mode: "public" | "
   const knownPulls = new Set(pulls.map(pull => pull.number));
   const olderReferences = new Set<number>();
   for (const pull of recentPulls) {
+    if (!pull.merged_at) continue;
     const text = pull.title + "\n" + (pull.body || "");
     for (const number of supersededPullReferences(text)) if (number > 0 && !knownPulls.has(number)) olderReferences.add(number);
   }
@@ -61,8 +65,8 @@ export async function readRepositoryGraph(repository: string, mode: "public" | "
   }));
   pulls.push(...referencedPulls.filter((pull): pull is Pull => !!pull && olderReferences.has(pull.number)));
   const graph: RepositoryGraph = {
-    repository, revision, indexedAt: new Date().toISOString(), nodes: [], edges: [],
-    coverage: { files: 0, importFiles: 0, treePartial: tree.truncated || tree.tree.length > treeEntryLimit, historyPartial: commits.length === 24 || pulls.length === 18 },
+    repository, revision, analysisVersion, indexedAt: new Date().toISOString(), nodes: [], edges: [],
+    coverage: { files: 0, importFiles: 0, treePartial: tree.truncated || tree.tree.length > treeEntryLimit, historyPartial: commits.length === 24 || recentPulls.length === 18 },
   };
   const model = graphModel(graph, web);
   const { add, link } = model;

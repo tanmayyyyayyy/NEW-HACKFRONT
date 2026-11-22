@@ -54,9 +54,10 @@ test("indexes GitHub PR decisions and commits and reuses the stored Neo4j snapsh
     if (url.pathname === prefix + "/pulls") return Response.json([
       { number: 8, title: "Replaces #4", body: null, merge_commit_sha: newest, merged_at: "2026-11-22" },
       { number: 4, title: "Original change", body: null, merge_commit_sha: earlier, merged_at: "2026-11-21" },
+      { number: 9, title: "Changes the default", body: "See #4 for build instructions.", merge_commit_sha: null, merged_at: "2026-11-23" },
     ]);
     if (url.pathname === prefix + "/pulls/8/commits") return Response.json([commit]);
-    if (url.pathname === prefix + "/pulls/4/commits") return Response.json([]);
+    if ([prefix + "/pulls/4/commits", prefix + "/pulls/9/commits"].includes(url.pathname)) return Response.json([]);
     return new Response(null, { status: 500 });
   });
   t.mock.method(driver, "executeQuery", async () => ({ records: saved ? [{ get: () => JSON.stringify(saved) }] : [] }));
@@ -71,6 +72,8 @@ test("indexes GitHub PR decisions and commits and reuses the stored Neo4j snapsh
   }));
   const indexed = await readRepositoryGraph("example/repo", "public", "");
   assert(indexed.edges.some(edge => edge.from === "pull:8" && edge.to === "pull:4" && edge.kind === "SUPERSEDES"));
+  assert(indexed.edges.some(edge => edge.from === "pull:9" && edge.to === "pull:4" && edge.kind === "REFERENCES"));
+  assert(!indexed.edges.some(edge => edge.from === "pull:9" && edge.kind === "SUPERSEDES"));
   assert(indexed.edges.some(edge => edge.from === "pull:8" && edge.to === "commit:" + newest && edge.kind === "INCLUDES"));
   assert(indexed.edges.some(edge => edge.from === "commit:" + newest && edge.to === "commit:" + earlier && edge.kind === "PARENT"));
   assert(writes.some(query => query.includes("GRAPH_EDGE")));

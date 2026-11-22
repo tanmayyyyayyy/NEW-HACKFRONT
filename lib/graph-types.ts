@@ -18,6 +18,7 @@ export type GraphEdge = {
 
 export type RepositoryGraph = {
   repository: string;
+  analysisVersion?: number;
   source?: "folder";
   revision: string;
   indexedAt: string;
