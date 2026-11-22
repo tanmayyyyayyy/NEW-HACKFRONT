@@ -62,7 +62,7 @@ export function AccountForm({ methods, initialPath }: { initialPath: "public" | 
   return <section><fieldset className="access-picks"><legend>Workspace access</legend>
     {(["private","public"] as const).map(value => <label key={value}><input type="radio" name="path" checked={value === path} disabled={busy} onChange={() => setPath(value)} />
       <span><strong>{value === "private" ? "Private team handover" : "Public repo learning"}</strong><small>{value === "private" ? "For engineers with access to a team repository." : "For exploring GitHub projects at your own pace."}</small></span></label>)}</fieldset>
-    {path === "private" && !session && mode === "signin" && <form onSubmit={connectPrivate}>
+    {path === "private" && !session && mode === "signin" && <form method="post" onSubmit={connectPrivate}>
       <h2>Connect a private repository</h2>
       <p>Sign in with your GitHub repository token. Ask your manager to grant you read access in GitHub first.</p>
       <label>Private repository<input name="repository" required placeholder="organization/repository" maxLength={170} /></label>
@@ -75,7 +75,7 @@ export function AccountForm({ methods, initialPath }: { initialPath: "public" | 
     {path === "public" && mode !== "reset" && <a className="ink-button" href={destination}>Continue as guest →</a>}
     {(["github", "google"] as const).map(provider => methods[provider] && <button key={provider} disabled={busy}
       onClick={() => run(() => client.signIn.social({ provider, callbackURL: destination }))}>Continue with {provider === "github" ? "GitHub" : "Google"}</button>)}
-    {methods.email && <form key={mode} onSubmit={submit}>
+    {methods.email && <form key={mode} method="post" onSubmit={submit}>
       <h2>{{ signin: "Sign in with email", signup: "Create an account", forgot: "Recover your account", reset: "Choose a new password" }[mode]}</h2>
       {mode === "signup" && <label>Name<input name="name" required autoComplete="name" /></label>}
       {mode !== "reset" && <label>Email<input name="email" type="email" required autoComplete="email" /></label>}

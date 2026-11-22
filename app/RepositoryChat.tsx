@@ -1,195 +1,389 @@
 "use client";
 
-import { EvidenceTrail, downloadTrail, formatMarkdownTrail } from "./EvidenceTrail";
 import { createAuthClient } from "better-auth/react";
-import { takePrivateAccess } from "./private-transfer";
-import { VoiceControls } from "./VoiceControls";
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
-import type { Evidence } from "@/lib/repository-chat";
+import { EvidenceTrail, downloadTrail, formatMarkdownTrail, type TrailRow } from "./EvidenceTrail";
+import { BrandMark } from "./Mast";
+import { VoiceControls } from "./VoiceControls";
+import { takePrivateAccess } from "./private-transfer";
+import type { RepositoryGraph } from "@/lib/graph-types";
+import styles from "./workspace/chat.module.css";
 
 type Mode = "private" | "public";
 type Starter = { repo: string; question: string };
-type CopyTarget = "handover" | "query";
+type IndexedFile = { path: string; url?: string };
 type Result = {
-  evidence: { record: Evidence; links: { kind: string; basis: string; record: Evidence }[] }[];
-  throughDate: string | null; recordCount: number; matchBasis: string; query: string; bundled: boolean; summary: string | null; error?: string;
+  evidence: TrailRow[];
+  throughDate: string | null;
+  recordCount: number;
+  matchBasis: string;
+  query: string;
+  summary: string | null;
+  error?: string;
   explanationProvider: "Sarvam" | "OpenRouter" | null;
   explanationStatus: "ready" | "no-evidence" | "not-configured" | "unavailable" | null;
 };
+type Turn = { id: number; prompt: string; attachments: IndexedFile[]; language: string };
 const examples = [
-  ["Trace the migration fix", "Why preserve reading statistics during source migration? Trace issue #127 and PR #138."],
+  ["Trace a migration fix", "Why preserve reading statistics during source migration? Trace issue #127 and PR #138."],
   ["Compare two decisions", "Why did PR #146 replace the chapter update behavior from PR #112?"],
   ["Try an unanswered question", "Why does Futon use Kubernetes for billing?"],
 ];
 
 const client = createAuthClient();
 export function RepositoryChat({ initialMode, starter }: { initialMode: Mode; starter?: Starter }) {
-  const { data: session, isPending } = client.useSession();
-  return <Desk key={session?.user.id || "guest"} userId={session?.user.id} signedIn={Boolean(session)} isPending={isPending} initialMode={initialMode} starter={starter} />;
+  return initialMode === "private" ? <PrivateChat starter={starter} /> : <Desk mode="public" isPending={false} starter={starter} />;
 }
-function Desk({ initialMode, signedIn, isPending, starter, userId }: { userId?: string; initialMode: Mode; starter?: Starter; signedIn: boolean; isPending: boolean }) {
-  const mode = initialMode;
+
+function PrivateChat({ starter }: { starter?: Starter }) {
+  const { data: session, isPending } = client.useSession();
+  const userId = session?.user.id;
+  return <Desk key={userId ?? "guest"} mode="private" userId={userId} isPending={isPending} starter={starter} />;
+}
+
+function Desk({ mode, userId, isPending, starter }: { mode: Mode; userId?: string; isPending: boolean; starter?: Starter }) {
   const [repo, setRepo] = useState(starter?.repo ?? "");
+  const [repoDraft, setRepoDraft] = useState(starter?.repo ?? "");
   const [token, setToken] = useState("");
+  const [language, setLanguage] = useState("Hinglish");
+  const [explain, setExplain] = useState(false);
+  const [question, setQuestion] = useState(starter?.question ?? "");
+  const [turns, setTurns] = useState<(Turn & { answer: Result })[]>([]);
+  const [pending, setPending] = useState<Turn>();
+  const [error, setError] = useState("");
+  const [throughDate, setThroughDate] = useState("");
+  const [reuseSources, setReuseSources] = useState(true);
+  const [attachments, setAttachments] = useState<IndexedFile[]>([]);
+  const [indexed, setIndexed] = useState<{ files: IndexedFile[]; partial: boolean }>();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [fileFilter, setFileFilter] = useState("");
+  const [fileError, setFileError] = useState("");
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const fileRequest = useRef<AbortController>(null);
+  const thread = useRef<HTMLDivElement>(null);
+  const editor = useRef<HTMLTextAreaElement>(null);
+  const options = useRef<HTMLDetailsElement>(null);
+  const sequence = useRef(0);
+  const contextIds = (turns.at(-1)?.answer.evidence ?? []).map(({ record }) => record.id)
+    .filter(id => /^(?:#[1-9]\d{0,9}|[a-f0-9]{40})$/.test(id)).slice(0, 5);
+  const switchingRepository = repoDraft !== repo;
+
   useEffect(() => {
     if (!userId || mode !== "private") return;
     const access = takePrivateAccess(userId);
-    if (access) { setRepo(access.repository); setToken(access.token); }
-  }, [mode, userId]);
-  const [language, setLanguage] = useState("Hinglish");
-  const [sarvam, setSarvam] = useState(false);
-  const [question, setQuestion] = useState(starter?.question ?? "");
-  const [selected, setSelected] = useState(0);
-  const [turns, setTurns] = useState<{ question: string; answer: Result; language: string }[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [copyStatus, setCopyStatus] = useState<{ target: CopyTarget; message: string }>();
-  const copyTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(copyTimeout.current), []);
+    if (access) { setRepo(access.repository); setRepoDraft(access.repository); setToken(access.token); }
+  }, [userId, mode]);
+  useEffect(() => () => fileRequest.current?.abort(), []);
+  useEffect(() => {
+    const log = thread.current;
+    const latest = log?.lastElementChild;
+    if (!log || !latest || (!pending && !turns.length)) return;
+    log.scrollTop += latest.getBoundingClientRect().top - log.getBoundingClientRect().top;
+  }, [pending, turns]);
 
-  const [followUp, setFollowUp] = useState("");
-  const [throughDate, setThroughDate] = useState("");
-  const active = turns[turns.length - 1 - selected];
-  const contextIds = active?.answer.evidence.map(row => row.record.id).filter(id => /^(?:#\d+|[a-f0-9]{40})$/.test(id)).slice(0, 5) || [];
-
-  async function copyText(target: CopyTarget, text: string, successMessage: string) {
-    clearTimeout(copyTimeout.current);
-    setCopyStatus(undefined);
-    let message: string;
-    try {
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(text);
-        message = successMessage;
-      } else {
-        message = "Clipboard access is unavailable.";
-      }
-    } catch {
-      message = "Could not copy to the clipboard.";
-    }
-    setCopyStatus({ target, message });
-    clearTimeout(copyTimeout.current);
-    copyTimeout.current = setTimeout(() => setCopyStatus(undefined), 2500);
+  function closePicker() {
+    fileRequest.current?.abort();
+    setPickerOpen(false);
+    setLoadingFiles(false);
+    setFileError("");
+    setFileFilter("");
   }
 
-  async function send(prompt: string, follow = false) {
-    if (busy || prompt.trim().length < 3) return;
-    setBusy(true); setError("");
+  function changeRepository(value: string) {
+    closePicker();
+    setRepo(value);
+    setRepoDraft(value);
+    setIndexed(undefined);
+    setAttachments([]);
+    setTurns([]);
+    setExplain(false);
+    setError("");
+  }
+
+  async function openFiles() {
+    if (pickerOpen) { closePicker(); return; }
+    if (!repo.trim() || (mode === "private" && !token.trim())) return;
+    if (options.current) options.current.open = false;
+    setPickerOpen(true);
+    if (indexed) return;
+    const controller = new AbortController();
+    fileRequest.current = controller;
+    setLoadingFiles(true);
+    try {
+      const params = new URLSearchParams({ repo: repo.trim(), mode });
+      const response = await fetch("/api/graph?" + params, {
+        method: "POST", signal: controller.signal,
+        headers: mode === "private" ? { Authorization: "Bearer " + token } : {},
+      });
+      const result = await response.json() as RepositoryGraph & { error?: string };
+      if (controller.signal.aborted) return;
+      if (!response.ok) {
+        if (mode === "private" && [401, 403].includes(response.status)) {
+          changeRepository(repo);
+          setToken("");
+          setError(result.error || "Check your GitHub read token.");
+          return;
+        }
+        throw new Error(result.error || "The repository index is unavailable.");
+      }
+      const files = result.nodes.filter(node => node.kind === "file" && !/[\\\u0000-\u001f]/.test(node.detail))
+        .map(node => ({ path: node.detail, url: node.url })).sort((a, b) => a.path.localeCompare(b.path));
+      setIndexed({ files, partial: result.coverage.treePartial });
+    } catch (failure) {
+      if (!controller.signal.aborted) setFileError(failure instanceof Error ? failure.message : "Could not load indexed files.");
+    } finally {
+      if (!controller.signal.aborted) setLoadingFiles(false);
+    }
+  }
+
+  function draft(prompt: string) {
+    setQuestion(prompt);
+    editor.current?.focus();
+  }
+
+  async function send() {
+    const prompt = question.trim();
+    if (pending || switchingRepository || prompt.length < 3 || !repo.trim() || (mode === "private" && !token.trim())) return;
+    const turn = { id: ++sequence.current, prompt, attachments, language };
+    setPending(turn);
+    setError("");
+    closePicker();
+    if (options.current) options.current.open = false;
     try {
       const response = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(mode === "private" && { Authorization: "Bearer " + token }) },
-        body: JSON.stringify({ mode, repo, question: prompt, language, sarvam, contextIds: follow ? contextIds : [], throughDate: (follow ? active?.answer.throughDate : throughDate) || undefined }),
+        body: JSON.stringify({
+          mode, repo, question: prompt, language, sarvam: explain,
+          files: attachments.map(file => file.path), contextIds: reuseSources ? contextIds : [],
+          throughDate: throughDate || undefined,
+        }),
       });
-      const result = await response.json() as Result;
+      const answer = await response.json() as Result;
       if (!response.ok) {
-        if (mode === "private" && [401,403].includes(response.status)) {
-          setTurns([]); setSelected(0); setFollowUp(""); setToken(""); setSarvam(false);
+        if (mode === "private" && [401, 403].includes(response.status)) {
+          changeRepository(repo);
+          setToken("");
         }
-        throw new Error(result.error || "The question could not be answered.");
+        throw new Error(answer.error || "The question could not be answered.");
       }
-      setTurns(previous => [...previous.slice(-5), { question: prompt, answer: result, language }]);
-      setSelected(0); setQuestion(""); setFollowUp("");
+      setTurns(previous => [...previous.slice(-5), { ...turn, answer }]);
+      setQuestion("");
+      setAttachments([]);
+      setReuseSources(true);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "The question could not be answered.");
-    } finally { setBusy(false); }
+    } finally { setPending(undefined); }
   }
 
-  return <>
-    <div className="sf-workspace">
-      <form onSubmit={(event: FormEvent) => { event.preventDefault(); void send(question); }} className="sf-form">
-        <h2>Repository chatbot</h2>
-        <p>{mode === "private"
-          ? "Use your own GitHub token for a repository your team has granted you permission to read."
-          : "Study a company’s public codebase before you join or contribute. Trace commits and PRs to see how teams work."}</p>
-        {mode === "private" && !signedIn ? <p>{isPending ? "Checking sign-in…" : <a href="/account?path=private">Sign in for private handover →</a>}</p> : <>
-        <label>GitHub repository<input required value={repo} disabled={busy} placeholder="https://github.com/owner/repo" maxLength={170}
-          onChange={event => { setRepo(event.target.value); setFollowUp(""); setSarvam(false); setTurns([]); setSelected(0); setError(""); }} /></label>
-        {repo && <a className="inline-link repo-map-link" href={"/graph?" + new URLSearchParams({ repo, path: mode })}>
-          Open repository graph <span className="arrow" aria-hidden="true" />
-        </a>}
-        {mode === "private" && <label>Repository-scoped read token
-          <input type="password" autoComplete="off" required disabled={busy} value={token}
-            onChange={event => { setToken(event.target.value); setFollowUp(""); setSarvam(false); setTurns([]); setSelected(0); }} />
-          <small>Use a personal fine-grained token with read permissions for metadata, contents, issues and pull requests. It stays in this tab and is sent only to the SkillForge server for GitHub access.</small>
-        </label>}
-        {mode === "public" && <div className="sf-examples">{examples.map(([label, prompt]) =>
-          <button key={label} type="button" disabled={busy} onClick={() => {
-            if (repo !== "AppFuton/Futon") { setTurns([]); setSarvam(false); }
-            setFollowUp(""); setSelected(0);
-            setRepo("AppFuton/Futon"); setQuestion(prompt);
-          }}>{label}</button>)}</div>}
-        <label>Question<textarea required minLength={3} maxLength={500} rows={3} value={question} disabled={busy}
-          placeholder="Why was this behavior introduced? Include a PR number if you know it."
-          onChange={event => setQuestion(event.target.value)} /></label>
-        <VoiceControls text={question} label="question" language={language} disabled={busy}
-          onDictation={text => setQuestion(current => [current.trim(), text].filter(Boolean).join(" ").slice(0, 500))} />
-        <details className="history-window"><summary>Limit sources by date</summary><label>Include records through<input type="date" value={throughDate} disabled={busy} onChange={e => setThroughDate(e.target.value)} /></label><small>Uses the PR merge date when it falls within the cutoff and the opening date otherwise. Text reflects the retrieved version.</small></details>
-        <label className="sf-check"><input type="checkbox" checked={sarvam} disabled={busy} onChange={event => setSarvam(event.target.checked)} />
-          Let AI explain the evidence</label>
-        {sarvam && <small>Your question, selected excerpts, author names, dates and changed file paths may be shared with Sarvam or its OpenRouter fallback. GitHub tokens stay with SkillForge and GitHub.</small>}
-        <label>Voice and reply language<select value={language} onChange={event => setLanguage(event.target.value)} disabled={busy}>
-          <option>Hinglish</option><option>Hindi</option><option>English</option>
-        </select></label>
-        <button className="sf-submit" disabled={busy}>{busy ? "Finding evidence…" : "Ask about this repo"}</button>
-        </>}
-        {error && <p className="sf-error" role="alert">{error}</p>}
-      </form>
-      <section className="sf-results" aria-label="Repository chat" aria-live="polite">
-        <h2>Decision trail</h2>
-        {!turns.length && <div className="trail-empty"><h3>Follow the paper trail</h3><ol><li>Find the original decision</li><li>Read the discussion behind it</li><li>Check what changed later</li></ol><p>Ask a question to open the linked records here.</p></div>}
-        {turns.length > 1 && <label className="history-pick">Recent questions<select disabled={busy} value={selected} onChange={e => { setSelected(Number(e.target.value)); setFollowUp(""); }}>{[...turns].reverse().map((t,i) => <option value={i} key={i}>{t.question}</option>)}</select></label>}
-        {[...turns].reverse().slice(selected, selected+1).map(({ question: prompt, answer, language: answerLanguage }, i) => <article key={turns.length - i} className="sf-turn">
-          <h3>{prompt}</h3>
-          {!answer.evidence.length && <p>The indexed history could not establish an answer.</p>}
-          {answer.summary && <div className="sf-summary"><p><strong>{answer.explanationProvider} explanation</strong><br />{answer.summary}</p>
-            <VoiceControls text={answer.summary} label="answer" language={answerLanguage} /></div>}
-          {answer.explanationStatus === "not-configured" && <p>No explanation provider is configured. The source evidence is below.</p>}
-          {answer.explanationStatus === "unavailable" && <p>AI explanations are unavailable right now. The source evidence is below.</p>}
-          {answer.evidence.length > 0 && <p>{answer.matchBasis} · Neo4j{answer.bundled ? " · Bundled public Futon snapshot" : " · Bounded GitHub history"}</p>}
-          <small>{answer.recordCount} sampled records{answer.throughDate ? " through " + answer.throughDate : ""}</small>
-          {answer.evidence.length > 0 && /\b(who|when|author|date|kisne|kab)\b/i.test(prompt) && <ul className="source-facts">{answer.evidence.map(({record}) => <li key={record.id}><a href={record.url} target="_blank" rel="noreferrer">{record.id}</a> · {record.author || "Author unrecorded"} · {record.date.slice(0,10)} ({record.kind})</li>)}</ul>}
-          <EvidenceTrail rows={answer.evidence} />
-          {contextIds.length > 0 && <form className="thread-reply" onSubmit={e => { e.preventDefault(); void send(followUp, true); }}>
-            <label>Ask a follow-up<textarea value={followUp} rows={2} placeholder="Who recorded this change, and when?" required minLength={3} maxLength={500} disabled={busy} onChange={e => setFollowUp(e.target.value)} /></label>
-            <VoiceControls text={followUp} label="follow-up" language={language} disabled={busy}
-              onDictation={text => setFollowUp(current => [current.trim(), text].filter(Boolean).join(" ").slice(0, 500))} />
-            <small>Continuing from {contextIds.join(", ")}. The graph checks these sources again.</small>
-            <div className="sf-examples"><button type="button" disabled={busy} onClick={() => setFollowUp("Who recorded these changes and when?")}>Authors and dates</button>
-              <button type="button" disabled={busy} onClick={() => setFollowUp("Was the earlier decision replaced?")}>Check for overrides</button></div>
-            <button disabled={busy || followUp.trim().length < 3}>{busy ? "Checking sources…" : "Send follow-up"}</button>
-          </form>}
-          {answer.evidence.length > 0 && <div className="trail-actions">
-            <button type="button" onClick={() => downloadTrail(prompt, answer.evidence)}>Download cited trail</button>
-            <button type="button" onClick={() => void copyText("handover", formatMarkdownTrail(prompt, answer.evidence), "Handover note copied!")}>Copy handover note</button>
-            <span className={copyStatus?.target === "handover" ? "copy-notice" : undefined} role="status">
-              {copyStatus?.target === "handover" && copyStatus.message}
-            </span>
-          </div>}
-          {answer.evidence.map(({ record, links }) => <div className="sf-record" key={record.id}>
-            <div className="sf-record-head">
-              <span className={"sf-kind-badge sf-kind-" + record.kind.toLowerCase().replace(/[^a-z0-9]/g, "-")}>{record.kind}</span>
-              <a href={record.url} target="_blank" rel="noreferrer">{record.title}</a>
+  if (mode === "private" && !userId) {
+    return <div className={styles.empty}>{isPending ? <p role="status">Checking sign-in…</p> : <a href="/account?path=private">Sign in for private handover</a>}</div>;
+  }
+
+  const filter = fileFilter.trim().toLowerCase();
+  const matchingFiles = indexed?.files.filter(file => file.path.toLowerCase().includes(filter)) ?? [];
+  const canAttach = Boolean(!switchingRepository && repo.trim() && (mode !== "private" || token.trim()));
+  const hasConversation = Boolean(turns.length || pending);
+  return <section className={styles.desk} aria-label="Repository chat">
+    <div className={styles.context}>
+      <label>GitHub repository
+        <input value={repoDraft} required form="chat-composer" disabled={Boolean(pending)} placeholder="owner/repository" maxLength={170}
+          onChange={event => {
+            if (turns.length || attachments.length || pickerOpen) setRepoDraft(event.target.value);
+            else changeRepository(event.target.value);
+          }}
+          onKeyDown={event => {
+            if (event.key === "Enter" && switchingRepository && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              if (repoDraft.trim()) changeRepository(repoDraft.trim());
+            }
+          }} />
+      </label>
+      {mode === "private" && <label>Repository-scoped read token
+        <input form="chat-composer" type="password" autoComplete="off" required disabled={Boolean(pending)} value={token}
+          onChange={event => { changeRepository(repo); setToken(event.target.value); }}
+          placeholder="Fine-grained GitHub token" />
+      </label>}
+      {switchingRepository ? <div className={styles.repoActions}>
+        <button type="button" disabled={!repoDraft.trim()} onClick={() => changeRepository(repoDraft.trim())}>Switch repository</button>
+        <button type="button" onClick={() => setRepoDraft(repo)}>Cancel</button>
+      </div> : repo.trim() && <a className={styles.graphLink} href={"/graph?" + new URLSearchParams({ repo: repo.trim(), path: mode })}>Open graph <span className="arrow" aria-hidden="true" /></a>}
+      {turns.length > 0 && !switchingRepository && <button className={styles.newChat} type="button" disabled={Boolean(pending)}
+        onClick={() => { setTurns([]); setQuestion(""); setAttachments([]); setError(""); setReuseSources(true); closePicker(); }}>New chat</button>}
+    </div>
+
+    <div ref={thread} className={styles.thread} data-active={hasConversation} role="log" aria-label="Conversation" tabIndex={hasConversation ? 0 : undefined}>
+      {!turns.length && !pending && <div className={styles.empty}>
+        <BrandMark />
+        <h2>What changed, and why?</h2>
+        <p>Ask about a decision, cite a PR, or attach a repository file to trace its history.</p>
+      </div>}
+      {turns.map(turn => <article className={styles.turn} key={turn.id}>
+        <Prompt turn={turn} />
+        <Answer turn={turn} />
+      </article>)}
+      {pending && <article className={styles.turn} aria-busy="true">
+        <Prompt turn={pending} />
+        <div className={styles.answerHead} role="status"><BrandMark /><strong>Looking for evidence…</strong></div>
+      </article>}
+    </div>
+    <div className={styles.dock}>
+      <form className={styles.composer} id="chat-composer" method="post" onSubmit={event => { event.preventDefault(); void send(); }}>
+        {mode === "public" && !turns.length && !pending && <div className={styles.examples} aria-label="Example prompts">
+          {examples.map(([label, prompt]) => <button type="button" key={label} onClick={() => {
+            if (repo !== "AppFuton/Futon") changeRepository("AppFuton/Futon");
+            draft(prompt);
+          }}>{label}</button>)}
+        </div>}
+        {turns.length > 0 && !pending && contextIds.length > 0 && <div className={styles.examples} aria-label="Suggested follow-ups">
+          <button type="button" onClick={() => draft("Who recorded these changes and when?")}>Authors and dates</button>
+          <button type="button" onClick={() => draft("Was the earlier decision replaced?")}>Check for overrides</button>
+        </div>}
+        {pickerOpen && <section className={styles.filePicker} aria-label="Indexed repository files" id="chat-files"
+          onKeyDown={event => { if (event.key === "Escape") { closePicker(); editor.current?.focus(); } }}>
+          <div className={styles.fileHeading}><strong>Attach repository files</strong>
+            <button type="button" onClick={() => { closePicker(); editor.current?.focus(); }}>Done</button></div>
+          <p>Choose up to three paths to find related pull requests and commits.</p>
+          {loadingFiles ? <div role="status">Loading the repository index…</div> : fileError ? <p role="alert">{fileError}</p> : <>
+            <input type="search" autoFocus aria-label="Search indexed files" placeholder="Search by file or folder" value={fileFilter}
+              onChange={event => setFileFilter(event.target.value)} />
+            {!matchingFiles.length && <p>{filter ? "No indexed files match your search." : "This index contains no attachable files."}</p>}
+            <ul className={styles.fileList}>
+              {matchingFiles.slice(0, 30).map(file => {
+                const attached = attachments.some(item => item.path === file.path);
+                return <li key={file.path}><button type="button" aria-pressed={attached}
+                  disabled={!attached && attachments.length >= 3}
+                  onClick={() => setAttachments(current => attached ? current.filter(item => item.path !== file.path) : [...current, file])}>
+                  <code>{file.path}</code><span>{attached ? "Added" : "Add"}</span>
+                </button></li>;
+              })}
+            </ul>
+            {matchingFiles.length > 30 && <small>Showing 30 of {matchingFiles.length}. Narrow your search to see other files.</small>}
+            {indexed?.partial && <small>The GitHub tree index is partial.</small>}
+          </>}
+        </section>}
+        <div className={styles.inputBox}>
+          {attachments.length > 0 && <ul className={styles.attachments} aria-label="Attached files">
+            {attachments.map(file => <li key={file.path}><code title={file.path}>{file.path}</code>
+              <button type="button" aria-label={"Remove " + file.path} disabled={Boolean(pending)}
+                onClick={() => setAttachments(items => items.filter(item => item.path !== file.path))}>×</button></li>)}
+          </ul>}
+          <textarea ref={editor} aria-label="Question" required minLength={3} maxLength={500} rows={2} value={question}
+            readOnly={Boolean(pending)} placeholder={turns.length ? "Ask a follow-up…" : "Ask about a repository…"}
+            onChange={event => setQuestion(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }} />
+          <div className={styles.composerTools}>
+            <button type="button" className={styles.attachButton} disabled={!canAttach || Boolean(pending)} aria-expanded={pickerOpen}
+              aria-controls={pickerOpen ? "chat-files" : undefined} onClick={() => void openFiles()}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Attach files
+            </button>
+            <details className={styles.options} ref={options} onToggle={event => { if (event.currentTarget.open && pickerOpen) closePicker(); }}>
+              <summary>Options</summary>
+              <div className={styles.optionsPanel}>
+                <label>Voice and reply language<select value={language} disabled={Boolean(pending)} onChange={event => setLanguage(event.target.value)}>
+                  <option>Hinglish</option><option>Hindi</option><option>English</option>
+                </select></label>
+                <label>Include records through<input type="date" value={throughDate} disabled={Boolean(pending)} onChange={event => setThroughDate(event.target.value)} /></label>
+                <label className="sf-check"><input type="checkbox" checked={explain} disabled={Boolean(pending)}
+                  onChange={event => setExplain(event.target.checked)} />Let AI explain the evidence</label>
+                {explain && <small>Your question, selected excerpts, author names, dates and changed file paths may be shared with Sarvam or OpenRouter.</small>}
+                {contextIds.length > 0 && <label className="sf-check"><input type="checkbox" checked={reuseSources} disabled={Boolean(pending)}
+                  onChange={event => setReuseSources(event.target.checked)} />Use sources from the last reply</label>}
+              </div>
+            </details>
+            <div className={styles.voice}>
+              <VoiceControls text={question} label="question" language={language} disabled={Boolean(pending)} iconOnly
+                onDictation={text => setQuestion(current => [current.trim(), text].filter(Boolean).join(" ").slice(0, 500))} />
             </div>
-            <small>{record.kind} · {record.author ? "@" + record.author : "Unknown author"} · {record.date.slice(0, 10)}</small>
-            {Boolean(record.files?.length) && <details><summary>Changed files ({record.files!.length} shown)</summary><ul>{record.files!.map(path => <li key={path}><code>{path}</code></li>)}</ul><a href={record.url + "/files"} target="_blank" rel="noreferrer">Inspect the GitHub diff ↗</a></details>}
+            <button type="submit" className={styles.send} aria-label={turns.length ? "Send follow-up" : "Ask about this repo"} title="Send question"
+              disabled={Boolean(pending) || question.trim().length < 3 || !canAttach}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 19V5m-6 6 6-6 6 6" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        {error && <p className="sf-error" role="alert">{error}</p>}
+        <small className={styles.composerHint}>{switchingRepository ? "Switching repositories starts a new conversation." :
+          mode === "private" ? "Your GitHub token stays in this tab and is sent to SkillForge for GitHub access." :
+          !repo.trim() ? "Choose a GitHub repository to ask a question or attach files." : "Enter to send · Shift + Enter for a new line"}</small>
+      </form>
+    </div>
+  </section>;
+}
+
+function Prompt({ turn }: { turn: Turn }) {
+  return <div className={styles.userMessage}>
+    <h3>{turn.prompt}</h3>
+    {turn.attachments.length > 0 && <ul aria-label="Files in this question">{turn.attachments.map(file =>
+      <li key={file.path}>{file.url ? <a href={file.url} target="_blank" rel="noreferrer"><code>{file.path}</code></a> : <code>{file.path}</code>}</li>)}</ul>}
+  </div>;
+}
+
+function Answer({ turn }: { turn: Turn & { answer: Result } }) {
+  const { answer, prompt, language } = turn;
+  const [copied, setCopied] = useState<{ target: "handover" | "query"; message: string }>();
+  const timeout = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timeout.current), []);
+  async function copy(target: "handover" | "query", value: string, message: string) {
+    try { await navigator.clipboard.writeText(value); }
+    catch { message = "Could not copy to the clipboard."; }
+    setCopied({ target, message });
+    clearTimeout(timeout.current);
+    timeout.current = setTimeout(() => setCopied(undefined), 2500);
+  }
+
+  return <div className={styles.answer}>
+    <div className={styles.answerHead}><BrandMark /><strong>SkillForge</strong></div>
+    {answer.summary && <>
+      <p className={styles.summary}>{answer.summary}</p>
+      <VoiceControls text={answer.summary} label="answer" language={language} />
+      <small>{answer.explanationProvider} explanation</small>
+    </>}
+    {!answer.evidence.length && <p>{turn.attachments.length ? "No matching evidence was found for the attached files." : "The indexed history could not establish an answer."}</p>}
+    {answer.explanationStatus === "not-configured" && <p>No AI explanation provider is configured.</p>}
+    {answer.explanationStatus === "unavailable" && <p>AI explanations are temporarily unavailable.</p>}
+    {answer.evidence.length > 0 && <>
+      <EvidenceTrail rows={answer.evidence} />
+      {/\b(who|when|author|date|kisne|kab)\b/i.test(prompt) && <ul className="source-facts">
+        {answer.evidence.map(({ record }) => <li key={record.id}>
+          <a href={record.url} target="_blank" rel="noreferrer">{record.id}</a> · {record.author || "Author unrecorded"} · {record.date.slice(0, 10)} ({record.kind})
+        </li>)}
+      </ul>}
+      <p className={styles.evidenceLabel}>{answer.matchBasis} · {answer.recordCount} records sampled{answer.throughDate ? " through " + answer.throughDate : ""}</p>
+      <div className={styles.sources}>
+        {answer.evidence.map(({ record, links }) => <details key={record.id} className={styles.source}>
+          <summary><small>{record.kind}</small><span>{record.title}</span></summary>
+          <div>
+            <small>{record.author ? "@" + record.author : "Unknown author"} · {record.date.slice(0, 10)}</small>
             {record.text && <p>{record.text.slice(0, 550)}{record.text.length > 550 ? "…" : ""}</p>}
+            {!!record.files?.length && <ul>{record.files.map(path => <li key={path}><code>{path}</code></li>)}</ul>}
+            <a href={record.url} target="_blank" rel="noreferrer">Open source on GitHub ↗</a>
+            {!!record.files?.length && record.kind.endsWith("PR") && <> · <a href={record.url + "/files"} target="_blank" rel="noreferrer">View diff ↗</a></>}
             {links.length > 0 && <ul>{links.map(({ kind, basis, record: linked }, index) =>
               <li key={index}>{kind === "SUPERSEDES" ? "Override" : kind === "DISCUSSION" ? "Discussion" : "Reference"} ·{" "}
-                <a href={linked.url} target="_blank" rel="noreferrer">{linked.title}</a><small>{basis}</small></li>)}</ul>}
-          </div>)}
-          <details className="cypher-details"><summary>View executed Cypher</summary>
-            <div className="cypher-box">
-              <button type="button" className="copy-cypher-btn" onClick={() => void copyText("query", answer.query, "Cypher query copied!")}>Copy query</button>
-              <span className={copyStatus?.target === "query" ? "copy-notice" : undefined} role="status">
-                {copyStatus?.target === "query" && copyStatus.message}
-              </span>
-              <pre>{answer.query}</pre>
-            </div>
-          </details>
-        </article>)}
-        {turns.length > 0 && <button type="button" disabled={busy} onClick={() => { setTurns([]); setSelected(0); setFollowUp(""); setQuestion(""); setError(""); }}>Clear conversation</button>}
-      </section>
-    </div>
-  </>;
+                <a href={linked.url} target="_blank" rel="noreferrer">{linked.title}</a><small> {basis}</small></li>)}</ul>}
+          </div>
+        </details>)}
+      </div>
+      <div className="trail-actions">
+        <button type="button" onClick={() => downloadTrail(prompt, answer.evidence)}>Download cited trail</button>
+        <button type="button" onClick={() => void copy("handover", formatMarkdownTrail(prompt, answer.evidence), "Handover note copied!")}>Copy handover note</button>
+        <span role="status">{copied?.target === "handover" && copied.message}</span>
+      </div>
+    </>}
+    <details className={styles.query}><summary>View executed Cypher</summary>
+      <button type="button" onClick={() => void copy("query", answer.query, "Cypher query copied!")}>Copy query</button>
+      <span role="status">{copied?.target === "query" && copied.message}</span>
+      <pre>{answer.query}</pre>
+    </details>
+  </div>;
 }

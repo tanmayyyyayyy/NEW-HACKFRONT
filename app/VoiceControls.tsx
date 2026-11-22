@@ -22,12 +22,13 @@ function recognitionConstructor() {
   return browser.SpeechRecognition ?? browser.webkitSpeechRecognition;
 }
 
-export function VoiceControls({ text, label, language, onDictation, disabled }: {
+export function VoiceControls({ text, label, language, onDictation, disabled, iconOnly = false }: {
   text: string;
   label: string;
   language: string;
   onDictation?: (text: string) => void;
   disabled?: boolean;
+  iconOnly?: boolean;
 }) {
   const [available, setAvailable] = useState({ recognition: false, recording: false, speech: false });
   const [listening, setListening] = useState(false);
@@ -232,12 +233,23 @@ export function VoiceControls({ text, label, language, onDictation, disabled }: 
 
   if (!available.speech && !onDictation) return null;
   const cloudRecording = available.recording && (!available.recognition || preferRecording);
+  const dictationActive = listening || recording === "recording";
+  const dictateLabel = dictationActive ? "Stop dictation" : "Dictate " + label;
   return <div className="voice-controls">
-    {onDictation && <button type="button" className="dictation-button" disabled={disabled || speaking || recording === "starting" || recording === "transcribing"} onClick={dictate}>
-      <span aria-hidden="true">🎙 </span>{listening || recording === "recording" ? "Stop dictation" : "Dictate " + label}
+    {onDictation && <button type="button" className="dictation-button" aria-label={dictateLabel} title={dictateLabel}
+      data-listening={dictationActive} disabled={disabled || speaking || recording === "starting" || recording === "transcribing"} onClick={dictate}>
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+        {dictationActive ? <rect x="6" y="6" width="12" height="12" rx="2" /> : <>
+          <rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11v1a7 7 0 0 0 14 0v-1m-7 8v3m-3 0h6" />
+        </>}
+      </svg>{!iconOnly && dictateLabel}
     </button>}
-    {available.speech && <button type="button" disabled={disabled || listening || Boolean(recording) || !text.trim()} onClick={speak}>
-      {speaking ? "Stop reading" : "Read " + label + " aloud"}
+    {available.speech && <button type="button" className={iconOnly ? "read-button" : undefined}
+      aria-label={speaking ? "Stop reading" : "Read " + label + " aloud"} title={speaking ? "Stop reading" : "Read " + label + " aloud"}
+      disabled={disabled || listening || Boolean(recording) || !text.trim()} onClick={speak}>
+      {iconOnly ? <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 9h4l5-4v14l-5-4H4z" /><path d={speaking ? "m16 9 5 6m0-6-5 6" : "M16 9a4 4 0 0 1 0 6m2-9a8 8 0 0 1 0 12"} />
+      </svg> : speaking ? "Stop reading" : "Read " + label + " aloud"}
     </button>}
     {notice && <small role="status">{notice}</small>}
     {onDictation && cloudRecording && !recording && <small>Recorded audio is sent to Sarvam for transcription.</small>}
